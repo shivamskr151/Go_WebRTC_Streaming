@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  webrtc-server:
+    build: .
+    ports:
+      - "8080:8080"  # HTTP server
+      - "1935:1935"  # RTMP server
+    environment:
+      - HTTP_PORT=8080
+      - RTMP_PORT=1935
+      - RTMP_URL=rtmp://safetycaptain.arresto.in/camera_0051/0051?username=wrakash&password=akash@1997
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+  # Optional: Add a monitoring service
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+
+networks:
+  default:
+    name: webrtc-network

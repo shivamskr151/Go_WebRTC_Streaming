@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 30px;
+            aspect-ratio: 16/9;
+        }
+
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(240, 147, 251, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(79, 172, 254, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .status {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .status h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .status-value {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .status-connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .snapshot-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .snapshot-image {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+            margin-top: 15px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            display: none;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            display: none;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎥 Go WebRTC Streaming</h1>
+            <p>Real-time video streaming with RTMP support</p>
+        </div>
+
+        <div class="video-container">
+            <video id="videoElement" autoplay muted playsinline></video>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn btn-primary">Start Stream</button>
+            <button id="stopBtn" class="btn btn-secondary" disabled>Stop Stream</button>
+            <button id="snapshotBtn" class="btn btn-success">Capture Snapshot</button>
+            <button id="statusBtn" class="btn btn-primary">Refresh Status</button>
+        </div>
+
+        <div class="status" id="statusContainer">
+            <h3>📊 System Status</h3>
+            <div class="status-item">
+                <span class="status-label">WebRTC Connection:</span>
+                <span class="status-value status-disconnected" id="webrtcStatus">Disconnected</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">RTMP Server:</span>
+                <span class="status-value status-disconnected" id="rtmpStatus">Disconnected</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Connected Peers:</span>
+                <span class="status-value" id="peerCount">0</span>
+            </div>
+        </div>
+
+        <div class="loading" id="loading">Loading...</div>
+        <div class="error" id="error"></div>
+        <div class="success" id="success"></div>
+
+        <div class="snapshot-container" id="snapshotContainer" style="display: none;">
+            <h3>📸 Captured Snapshot</h3>
+            <img id="snapshotImage" class="snapshot-image" alt="Snapshot">
+        </div>
+    </div>
+
+    <script>
+        class WebRTCClient {
+            constructor() {
+                this.pc = null;
+                this.videoElement = document.getElementById('videoElement');
+                this.startBtn = document.getElementById('startBtn');
+                this.stopBtn = document.getElementById('stopBtn');
+                this.snapshotBtn = document.getElementById('snapshotBtn');
+                this.statusBtn = document.getElementById('statusBtn');
+                this.loading = document.getElementById('loading');
+                this.error = document.getElementById('error');
+                this.success = document.getElementById('success');
+                this.snapshotContainer = document.getElementById('snapshotContainer');
+                this.snapshotImage = document.getElementById('snapshotImage');
+                
+                this.setupEventListeners();
+                this.updateStatus();
+            }
+
+            setupEventListeners() {
+                this.startBtn.addEventListener('click', () => this.startStream());
+                this.stopBtn.addEventListener('click', () => this.stopStream());
+                this.snapshotBtn.addEventListener('click', () => this.captureSnapshot());
+                this.statusBtn.addEventListener('click', () => this.updateStatus());
+            }
+
+            async startStream() {
+                try {
+                    this.showLoading(true);
+                    this.hideMessages();
+
+                    // Create peer connection with optimized configuration including local TURN server
+                    this.pc = new RTCPeerConnection({
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' },
+                            { urls: 'stun:stun2.l.google.com:19302' },
+                            { urls: 'stun:stun3.l.google.com:19302' },
+                            { urls: 'stun:stun4.l.google.com:19302' },
+                            // Local TURN server for development
+                            {
+                                urls: 'turn:127.0.0.1:3478',
+                                username: 'webrtc',
+                                credential: 'webrtc123'
+                            },
+                            {
+                                urls: 'turn:127.0.0.1:3478',
+                                username: 'test',
+                                credential: 'test123'
+                            }
+                        ],
+                        iceTransportPolicy: 'all',
+                        bundlePolicy: 'balanced',
+                        rtcpMuxPolicy: 'require',
+                        iceCandidatePoolSize: 10
+                    });
+
+                    // Handle incoming tracks
+                    this.pc.ontrack = (event) => {
+                        console.log('Received track:', event.track.kind, event.track);
+                        if (event.track.kind === 'video') {
+                            console.log('Setting video source object:', event.streams[0]);
+                            this.videoElement.srcObject = event.streams[0];
+                            this.showSuccess('Video track received!');
+                        }
+                    };
+
+                    // Handle connection state changes
+                    this.pc.onconnectionstatechange = () => {
+                        console.log('Connection state:', this.pc.connectionState);
+                        this.updateWebRTCStatus();
+                    };
+
+                    // Handle ICE connection state changes
+                    this.pc.oniceconnectionstatechange = () => {
+                        console.log('ICE connection state:', this.pc.iceConnectionState);
+                        this.updateWebRTCStatus();
+                    };
+
+                    // Handle ICE candidates
+                    this.pc.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            console.log('ICE candidate:', event.candidate);
+                        } else {
+                            console.log('ICE gathering complete');
+                        }
+                    };
+
+                    // Handle ICE gathering state changes
+                    this.pc.onicegatheringstatechange = () => {
+                        console.log('ICE gathering state:', this.pc.iceGatheringState);
+                    };
+
+                    // Create a data channel to make the offer valid
+                    const dataChannel = this.pc.createDataChannel('streaming', {
+                        ordered: true
+                    });
+                    
+                    dataChannel.onopen = () => {
+                        console.log('Data channel opened');
+                    };
+                    
+                    dataChannel.onmessage = (event) => {
+                        console.log('Received message:', event.data);
+                    };
+
+                    // Create offer
+                    const offer = await this.pc.createOffer();
+                    await this.pc.setLocalDescription(offer);
+
+                    // Send offer to server
+                    const response = await fetch('/api/offer', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            sdp: offer
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const answer = await response.json();
+                    // Parse the SDP answer directly (no double JSON parsing needed)
+                    const answerDesc = {
+                        type: 'answer',
+                        sdp: answer.sdp
+                    };
+                    await this.pc.setRemoteDescription(answerDesc);
+
+                    this.startBtn.disabled = true;
+                    this.stopBtn.disabled = false;
+                    this.showSuccess('Stream started successfully!');
+
+                } catch (error) {
+                    console.error('Error starting stream:', error);
+                    this.showError(`Failed to start stream: ${error.message}`);
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            stopStream() {
+                if (this.pc) {
+                    this.pc.close();
+                    this.pc = null;
+                }
+                
+                this.videoElement.srcObject = null;
+                this.startBtn.disabled = false;
+                this.stopBtn.disabled = true;
+                this.updateWebRTCStatus();
+                this.showSuccess('Stream stopped');
+            }
+
+            async captureSnapshot() {
+                try {
+                    this.showLoading(true);
+                    this.hideMessages();
+
+                    const response = await fetch('/api/snapshot');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    if (result.success) {
+                        this.snapshotImage.src = result.data;
+                        this.snapshotContainer.style.display = 'block';
+                        this.showSuccess('Snapshot captured successfully!');
+                    } else {
+                        throw new Error(result.error || 'Failed to capture snapshot');
+                    }
+
+                } catch (error) {
+                    console.error('Error capturing snapshot:', error);
+                    this.showError(`Failed to capture snapshot: ${error.message}`);
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            async updateStatus() {
+                try {
+                    const response = await fetch('/api/status');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const status = await response.json();
+                    
+                    // Update status indicators
+                    document.getElementById('webrtcStatus').textContent = 
+                        status.webrtc.connected_peers > 0 ? 'Connected' : 'Disconnected';
+                    document.getElementById('webrtcStatus').className = 
+                        `status-value ${status.webrtc.connected_peers > 0 ? 'status-connected' : 'status-disconnected'}`;
+                    
+                    document.getElementById('rtmpStatus').textContent = 
+                        status.rtmp.connected ? 'Connected' : 'Disconnected';
+                    document.getElementById('rtmpStatus').className = 
+                        `status-value ${status.rtmp.connected ? 'status-connected' : 'status-disconnected'}`;
+                    
+                    document.getElementById('peerCount').textContent = 
+                        `${status.webrtc.connected_peers}/${status.webrtc.total_peers}`;
+
+                } catch (error) {
+                    console.error('Error updating status:', error);
+                }
+            }
+
+            updateWebRTCStatus() {
+                if (!this.pc) {
+                    const statusElement = document.getElementById('webrtcStatus');
+                    statusElement.textContent = 'Disconnected';
+                    statusElement.className = 'status-value status-disconnected';
+                    return;
+                }
+
+                const connectionState = this.pc.connectionState;
+                const iceConnectionState = this.pc.iceConnectionState;
+                const statusElement = document.getElementById('webrtcStatus');
+                
+                // Show more detailed status
+                let statusText = connectionState;
+                let isConnected = false;
+                
+                switch (connectionState) {
+                    case 'connected':
+                        statusText = 'Connected';
+                        isConnected = true;
+                        break;
+                    case 'connecting':
+                        statusText = 'Connecting...';
+                        break;
+                    case 'disconnected':
+                        statusText = 'Disconnected';
+                        break;
+                    case 'failed':
+                        statusText = 'Failed';
+                        break;
+                    case 'closed':
+                        statusText = 'Closed';
+                        break;
+                    default:
+                        statusText = connectionState;
+                }
+                
+                statusElement.textContent = statusText;
+                statusElement.className = `status-value ${isConnected ? 'status-connected' : 'status-disconnected'}`;
+                
+                console.log(`WebRTC Status: ${connectionState}, ICE: ${iceConnectionState}`);
+            }
+
+            showLoading(show) {
+                this.loading.style.display = show ? 'block' : 'none';
+            }
+
+            showError(message) {
+                this.error.textContent = message;
+                this.error.style.display = 'block';
+                setTimeout(() => this.hideMessages(), 5000);
+            }
+
+            showSuccess(message) {
+                this.success.textContent = message;
+                this.success.style.display = 'block';
+                setTimeout(() => this.hideMessages(), 3000);
+            }
+
+            hideMessages() {
+                this.error.style.display = 'none';
+                this.success.style.display = 'none';
+            }
+        }
+
+        // Initialize the WebRTC client when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new WebRTCClient();
+        });
+    </script>
+</body>
+</html>
