@@ -11,6 +11,7 @@ import (
 	"golang-webrtc-streaming/internal/config"
 	"golang-webrtc-streaming/internal/rtmp"
 	"golang-webrtc-streaming/internal/server"
+	"golang-webrtc-streaming/internal/source"
 	"golang-webrtc-streaming/internal/webrtc"
 
 	"github.com/sirupsen/logrus"
@@ -22,6 +23,9 @@ func main() {
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
+
+	// Load .env early (project root)
+	config.LoadDotEnv(".env")
 
 	// Load configuration
 	cfg, err := config.Load()
@@ -36,21 +40,27 @@ func main() {
 	// Initialize WebRTC manager
 	webrtcManager := webrtc.NewManager()
 
-	// Initialize RTMP client
-	rtmpClient := rtmp.NewClient(cfg.RTMP.URL, webrtcManager)
+	// Initialize source manager
+	sourceManager := source.NewManager(webrtcManager)
+	sourceManager.InitializeSources(cfg.RTMP.URL, cfg.RTSP.URL)
 
 	// Initialize RTMP server
 	rtmpServer := rtmp.NewServer(cfg.RTMP.Port, webrtcManager)
 
-	// Initialize HTTP server
-	httpServer := server.NewServer(cfg.HTTP.Port, webrtcManager)
+	// Initialize HTTP server with source manager
+	httpServer := server.NewServer(cfg.HTTP.Port, webrtcManager, sourceManager)
 
-	// Start RTMP client
-	go func() {
-		if err := rtmpClient.Start(ctx); err != nil {
-			logrus.Errorf("RTMP client error: %v", err)
+	// Start all configured sources, select active type if provided
+	sourceManager.StartAll(ctx)
+	if cfg.Source.Type != "" {
+		if err := sourceManager.SetActiveSource(cfg.Source.Type); err != nil {
+			logrus.Warnf("Failed to set active source from config: %v", err)
 		}
-	}()
+	} else if cfg.RTSP.URL != "" {
+		_ = sourceManager.SetActiveSource("rtsp")
+	} else if cfg.RTMP.URL != "" {
+		_ = sourceManager.SetActiveSource("rtmp")
+	}
 
 	// Start RTMP server
 	go func() {
@@ -87,8 +97,20 @@ func printStartupInfo(cfg *config.Config) {
 	fmt.Println("=====================================")
 	fmt.Printf("📡 HTTP Server: http://localhost:%d\n", cfg.HTTP.Port)
 	fmt.Printf("📺 RTMP Server: rtmp://localhost:%d/live\n", cfg.RTMP.Port)
-	fmt.Printf("📹 RTMP Stream: %s\n", cfg.RTMP.URL)
+
+	// Show available sources
+	if cfg.RTMP.URL != "" {
+		fmt.Printf("📹 RTMP Source: %s\n", cfg.RTMP.URL)
+	}
+	if cfg.RTSP.URL != "" {
+		fmt.Printf("📹 RTSP Source: %s\n", cfg.RTSP.URL)
+	}
+	if cfg.Source.URL != "" {
+		fmt.Printf("🎯 Active Source: %s (%s)\n", cfg.Source.Type, cfg.Source.URL)
+	}
+
 	fmt.Println("🌐 Web Client: http://localhost:8080")
 	fmt.Println("📸 Snapshot API: http://localhost:8080/api/snapshot")
+	fmt.Println("🔄 Switch Source API: http://localhost:8080/api/source")
 	fmt.Println("=====================================")
 }

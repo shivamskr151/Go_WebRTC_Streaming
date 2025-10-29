@@ -238,6 +238,18 @@
             <button id="statusBtn" class="btn btn-primary">Refresh Status</button>
         </div>
 
+        <div class="source-controls" style="margin-bottom: 30px;">
+            <h3 style="text-align: center; margin-bottom: 15px; color: #333;">🎯 Source Selection</h3>
+            <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                <button id="switchToRTSP" class="btn btn-primary">Switch to RTSP</button>
+                <button id="switchToRTMP" class="btn btn-primary">Switch to RTMP</button>
+                <button id="refreshSource" class="btn btn-success">Refresh Source Info</button>
+            </div>
+            <div id="sourceInfo" style="text-align: center; margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 10px;">
+                <span id="currentSource">Loading...</span>
+            </div>
+        </div>
+
         <div class="status" id="statusContainer">
             <h3>📊 System Status</h3>
             <div class="status-item">
@@ -245,8 +257,8 @@
                 <span class="status-value status-disconnected" id="webrtcStatus">Disconnected</span>
             </div>
             <div class="status-item">
-                <span class="status-label">RTMP Server:</span>
-                <span class="status-value status-disconnected" id="rtmpStatus">Disconnected</span>
+                <span class="status-label">Video Source:</span>
+                <span class="status-value status-disconnected" id="sourceStatus">Disconnected</span>
             </div>
             <div class="status-item">
                 <span class="status-label">Connected Peers:</span>
@@ -273,6 +285,10 @@
                 this.stopBtn = document.getElementById('stopBtn');
                 this.snapshotBtn = document.getElementById('snapshotBtn');
                 this.statusBtn = document.getElementById('statusBtn');
+                this.switchToRTSP = document.getElementById('switchToRTSP');
+                this.switchToRTMP = document.getElementById('switchToRTMP');
+                this.refreshSource = document.getElementById('refreshSource');
+                this.currentSource = document.getElementById('currentSource');
                 this.loading = document.getElementById('loading');
                 this.error = document.getElementById('error');
                 this.success = document.getElementById('success');
@@ -281,6 +297,7 @@
                 
                 this.setupEventListeners();
                 this.updateStatus();
+                this.updateSourceInfo();
             }
 
             setupEventListeners() {
@@ -288,6 +305,9 @@
                 this.stopBtn.addEventListener('click', () => this.stopStream());
                 this.snapshotBtn.addEventListener('click', () => this.captureSnapshot());
                 this.statusBtn.addEventListener('click', () => this.updateStatus());
+                this.switchToRTSP.addEventListener('click', () => this.switchSource('rtsp'));
+                this.switchToRTMP.addEventListener('click', () => this.switchSource('rtmp'));
+                this.refreshSource.addEventListener('click', () => this.updateSourceInfo());
             }
 
             async startStream() {
@@ -436,19 +456,41 @@
                     this.showLoading(true);
                     this.hideMessages();
 
-                    const response = await fetch('/api/snapshot');
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                    // Check if video element has a stream
+                    if (!this.videoElement.srcObject) {
+                        throw new Error('No video stream available. Please start the stream first.');
                     }
 
-                    const result = await response.json();
-                    if (result.success) {
-                        this.snapshotImage.src = result.data;
-                        this.snapshotContainer.style.display = 'block';
-                        this.showSuccess('Snapshot captured successfully!');
-                    } else {
-                        throw new Error(result.error || 'Failed to capture snapshot');
+                    // Check if video is playing
+                    if (this.videoElement.paused || this.videoElement.ended) {
+                        throw new Error('Video is not playing. Please ensure the stream is active.');
                     }
+
+                    // Capture snapshot directly from the video element
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Set canvas dimensions to match video
+                    const videoWidth = this.videoElement.videoWidth || this.videoElement.clientWidth;
+                    const videoHeight = this.videoElement.videoHeight || this.videoElement.clientHeight;
+                    
+                    if (videoWidth === 0 || videoHeight === 0) {
+                        throw new Error('Video dimensions not available. Please wait for the video to load.');
+                    }
+                    
+                    canvas.width = videoWidth;
+                    canvas.height = videoHeight;
+                    
+                    // Draw the current video frame to canvas
+                    ctx.drawImage(this.videoElement, 0, 0, canvas.width, canvas.height);
+                    
+                    // Convert canvas to base64 JPEG
+                    const dataURL = canvas.toDataURL('image/jpeg', 0.9);
+                    
+                    // Display the snapshot
+                    this.snapshotImage.src = dataURL;
+                    this.snapshotContainer.style.display = 'block';
+                    this.showSuccess('Snapshot captured from live video stream!');
 
                 } catch (error) {
                     console.error('Error capturing snapshot:', error);
@@ -473,10 +515,10 @@
                     document.getElementById('webrtcStatus').className = 
                         `status-value ${status.webrtc.connected_peers > 0 ? 'status-connected' : 'status-disconnected'}`;
                     
-                    document.getElementById('rtmpStatus').textContent = 
-                        status.rtmp.connected ? 'Connected' : 'Disconnected';
-                    document.getElementById('rtmpStatus').className = 
-                        `status-value ${status.rtmp.connected ? 'status-connected' : 'status-disconnected'}`;
+                    document.getElementById('sourceStatus').textContent = 
+                        status.source.running ? `${status.source.type.toUpperCase()} - Running` : 'Disconnected';
+                    document.getElementById('sourceStatus').className = 
+                        `status-value ${status.source.running ? 'status-connected' : 'status-disconnected'}`;
                     
                     document.getElementById('peerCount').textContent = 
                         `${status.webrtc.connected_peers}/${status.webrtc.total_peers}`;
@@ -548,6 +590,69 @@
             hideMessages() {
                 this.error.style.display = 'none';
                 this.success.style.display = 'none';
+            }
+
+            async switchSource(sourceType) {
+                try {
+                    this.showLoading(true);
+                    this.hideMessages();
+
+                    const response = await fetch('/api/source', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            type: sourceType
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    this.showSuccess(`Switched to ${sourceType.toUpperCase()} source!`);
+                    this.updateSourceInfo();
+                    this.updateStatus();
+
+                } catch (error) {
+                    console.error('Error switching source:', error);
+                    this.showError(`Failed to switch to ${sourceType}: ${error.message}`);
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            async updateSourceInfo() {
+                try {
+                    const response = await fetch('/api/source');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const sourceInfo = await response.json();
+                    
+                    // Handle null/undefined values safely
+                    const sourceType = sourceInfo.type || '';
+                    const available = Array.isArray(sourceInfo.available) ? sourceInfo.available : [];
+                    
+                    const statusText = sourceInfo.running && sourceType
+                        ? `Current: ${sourceType.toUpperCase()} (Running)` 
+                        : sourceType
+                        ? `Current: ${sourceType.toUpperCase()} (Stopped)`
+                        : 'No active source';
+                    const availableText = available.length > 0 
+                        ? `Available: ${available.join(', ').toUpperCase()}` 
+                        : 'No sources available';
+                    
+                    this.currentSource.innerHTML = `${statusText}<br><small>${availableText}</small>`;
+
+                } catch (error) {
+                    console.error('Error updating source info:', error);
+                    this.currentSource.textContent = 'Error loading source info';
+                }
             }
         }
 

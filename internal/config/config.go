@@ -6,8 +6,10 @@ import (
 )
 
 type Config struct {
-	HTTP HTTPConfig `json:"http"`
-	RTMP RTMPConfig `json:"rtmp"`
+	HTTP   HTTPConfig   `json:"http"`
+	RTMP   RTMPConfig   `json:"rtmp"`
+	RTSP   RTSPConfig   `json:"rtsp"`
+	Source SourceConfig `json:"source"`
 }
 
 type HTTPConfig struct {
@@ -19,6 +21,15 @@ type RTMPConfig struct {
 	URL  string `json:"url"`
 }
 
+type RTSPConfig struct {
+	URL string `json:"url"`
+}
+
+type SourceConfig struct {
+	Type string `json:"type"` // "rtmp" or "rtsp"
+	URL  string `json:"url"`
+}
+
 func Load() (*Config, error) {
 	cfg := &Config{
 		HTTP: HTTPConfig{
@@ -26,7 +37,14 @@ func Load() (*Config, error) {
 		},
 		RTMP: RTMPConfig{
 			Port: getEnvAsInt("RTMP_PORT", 1936),
-			URL:  getEnv("RTMP_URL", "rtmp://safetycaptain.arresto.in/camera_0051/0051?username=wrakash&password=akash@1997"),
+			URL:  getEnv("RTMP_URL", ""),
+		},
+		RTSP: RTSPConfig{
+			URL: getEnv("RTSP_URL", ""),
+		},
+		Source: SourceConfig{
+			Type: getEnv("SOURCE_TYPE", ""),
+			URL:  getEnv("SOURCE_URL", ""),
 		},
 	}
 

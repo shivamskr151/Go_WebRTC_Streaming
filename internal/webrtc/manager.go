@@ -1,7 +1,14 @@
 package webrtc
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -17,6 +24,10 @@ type Manager struct {
 	rtpSequenceNumber uint16
 	rtpTimestamp      uint32
 	rtpSSRC           uint32
+	// Real-time snapshot capture
+	snapshotRequest chan bool
+	snapshotData    chan []byte
+	snapshotReady   bool
 }
 
 type Peer struct {
@@ -43,6 +54,9 @@ func NewManager() *Manager {
 		rtpSequenceNumber: 0,
 		rtpTimestamp:      0,
 		rtpSSRC:           0x12345678, // Random SSRC
+		snapshotRequest:   make(chan bool, 1),
+		snapshotData:      make(chan []byte, 1),
+		snapshotReady:     false,
 	}
 }
 
@@ -255,12 +269,41 @@ func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
 
 	logrus.Debugf("Writing video sample: size=%d, timestamp=%d, peers=%d", len(data), timestamp, len(m.peers))
 
+	// Check if data has valid H.264 start codes
+	if len(data) >= 4 {
+		hasStartCode := (data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x00 && data[3] == 0x01) ||
+			(data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x01)
+		if !hasStartCode {
+			logrus.Warnf("Video sample does not have valid H.264 start code: %02x %02x %02x %02x",
+				data[0], data[1], data[2], data[3])
+		}
+	}
+
+	// Check if snapshot is requested and capture this frame
+	select {
+	case <-m.snapshotRequest:
+		// Capture this frame for snapshot
+		frameCopy := make([]byte, len(data))
+		copy(frameCopy, data)
+		select {
+		case m.snapshotData <- frameCopy:
+			logrus.Info("Frame captured for snapshot")
+		default:
+			// Channel is full, skip this frame
+			logrus.Warn("Snapshot channel full, skipping frame")
+		}
+	default:
+		// No snapshot request, continue normally
+	}
+
 	// Parse H.264 NAL units from the data
 	nalUnits, err := m.parseH264NALUnits(data)
 	if err != nil {
 		logrus.Errorf("Failed to parse H.264 NAL units: %v", err)
 		return
 	}
+
+	logrus.Debugf("Parsed %d NAL units from video sample", len(nalUnits))
 
 	for _, peer := range m.peers {
 		peer.mu.RLock()
@@ -269,9 +312,15 @@ func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
 
 		if hasVideoTrack {
 			// Send each NAL unit as a separate sample
-			for _, nalUnit := range nalUnits {
+			for i, nalUnit := range nalUnits {
 				if len(nalUnit) == 0 {
 					continue
+				}
+
+				// Log NAL unit type for debugging
+				if len(nalUnit) > 0 {
+					nalType := nalUnit[0] & 0x1F
+					logrus.Debugf("NAL unit %d: type=%d, size=%d", i, nalType, len(nalUnit))
 				}
 
 				sample := media.Sample{
@@ -556,4 +605,118 @@ func (m *Manager) createRTPPacket(nalUnit []byte, timestamp uint32) []byte {
 	copy(rtpPacket[rtpHeaderSize:], nalUnit)
 
 	return rtpPacket
+}
+
+// RequestSnapshot triggers a snapshot capture from the next available video frame
+func (m *Manager) RequestSnapshot() {
+	select {
+	case m.snapshotRequest <- true:
+		logrus.Info("Snapshot request sent")
+	default:
+		logrus.Warn("Snapshot request channel full")
+	}
+}
+
+// CaptureSnapshot captures a frame from the live stream and converts it to JPEG
+func (m *Manager) CaptureSnapshot() (string, error) {
+	// Request a snapshot from the live stream
+	m.RequestSnapshot()
+
+	// Wait for the next frame to be captured (with timeout)
+	select {
+	case frameData := <-m.snapshotData:
+		if len(frameData) == 0 {
+			return "", fmt.Errorf("empty frame received")
+		}
+
+		logrus.Infof("Captured frame for snapshot: %d bytes", len(frameData))
+
+		// Convert H.264 frame to JPEG
+		jpegData, err := m.convertH264ToJPEG(frameData)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert H.264 to JPEG: %w", err)
+		}
+
+		// Encode to base64
+		base64Data := base64.StdEncoding.EncodeToString(jpegData)
+		return "data:image/jpeg;base64," + base64Data, nil
+
+	case <-time.After(5 * time.Second):
+		return "", fmt.Errorf("timeout waiting for video frame")
+	}
+}
+
+// convertH264ToJPEG converts H.264 frame to JPEG using FFmpeg
+func (m *Manager) convertH264ToJPEG(h264Data []byte) ([]byte, error) {
+	// Check if FFmpeg is available
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		logrus.Warnf("FFmpeg not found, using placeholder image: %v", err)
+		return m.createPlaceholderJPEG()
+	}
+
+	// Create temporary files for input and output
+	inputFile, err := os.CreateTemp("", "h264_input_*.h264")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp input file: %w", err)
+	}
+	defer os.Remove(inputFile.Name())
+	defer inputFile.Close()
+
+	outputFile, err := os.CreateTemp("", "jpeg_output_*.jpg")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp output file: %w", err)
+	}
+	defer os.Remove(outputFile.Name())
+	defer outputFile.Close()
+
+	// Write H.264 data to input file
+	if _, err := inputFile.Write(h264Data); err != nil {
+		return nil, fmt.Errorf("failed to write H.264 data: %w", err)
+	}
+	inputFile.Close()
+	outputFile.Close()
+
+	// Run FFmpeg to convert H.264 to JPEG
+	cmd := exec.Command("ffmpeg",
+		"-i", inputFile.Name(),
+		"-vframes", "1",
+		"-f", "image2",
+		"-y", // Overwrite output file
+		outputFile.Name(),
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		logrus.Errorf("FFmpeg conversion failed: %v, stderr: %s", err, stderr.String())
+		// Fallback to placeholder if FFmpeg fails
+		return m.createPlaceholderJPEG()
+	}
+
+	// Read the output JPEG file
+	jpegData, err := os.ReadFile(outputFile.Name())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read output JPEG file: %w", err)
+	}
+
+	return jpegData, nil
+}
+
+// createPlaceholderJPEG creates a simple placeholder JPEG image
+func (m *Manager) createPlaceholderJPEG() ([]byte, error) {
+	// Create a simple 100x100 red square JPEG as placeholder
+	img := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			img.Set(x, y, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }

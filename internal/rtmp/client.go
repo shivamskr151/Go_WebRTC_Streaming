@@ -21,12 +21,14 @@ type RTMPClient struct {
 	cmd           *exec.Cmd
 	isRunning     bool
 	mu            sync.RWMutex
+	shouldWrite   func() bool
 }
 
-func NewClient(rtmpURL string, webrtcManager *webrtcmanager.Manager) *RTMPClient {
+func NewClient(rtmpURL string, webrtcManager *webrtcmanager.Manager, shouldWrite func() bool) *RTMPClient {
 	return &RTMPClient{
 		url:           rtmpURL,
 		webrtcManager: webrtcManager,
+		shouldWrite:   shouldWrite,
 		isRunning:     false,
 	}
 }
@@ -192,7 +194,9 @@ func (c *RTMPClient) streamLoop(ctx context.Context, stdout, stderr io.ReadClose
 				logrus.Infof("Frame %d first bytes: %s", frameCount, strings.Join(hexBytes, " "))
 			}
 
-			c.webrtcManager.WriteVideoSample(frameData, timestamp)
+			if c.shouldWrite == nil || c.shouldWrite() {
+				c.webrtcManager.WriteVideoSample(frameData, timestamp)
+			}
 
 			frameCount++
 

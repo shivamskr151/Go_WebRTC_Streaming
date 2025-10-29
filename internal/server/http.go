@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"golang-webrtc-streaming/internal/source"
 	webrtcmanager "golang-webrtc-streaming/internal/webrtc"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,7 @@ import (
 type Server struct {
 	port          int
 	webrtcManager *webrtcmanager.Manager
+	sourceManager *source.Manager
 	router        *gin.Engine
 	server        *http.Server
 	isRunning     bool
@@ -42,12 +44,22 @@ type StatusResponse struct {
 		ConnectedPeers int `json:"connected_peers"`
 		TotalPeers     int `json:"total_peers"`
 	} `json:"webrtc"`
-	RTMP struct {
-		Connected bool `json:"connected"`
-	} `json:"rtmp"`
+	Source struct {
+		Type      string   `json:"type"`
+		Running   bool     `json:"running"`
+		Available []string `json:"available"`
+	} `json:"source"`
+	Streams struct {
+		RTMP bool `json:"rtmp"`
+		RTSP bool `json:"rtsp"`
+	} `json:"streams"`
 }
 
-func NewServer(port int, webrtcManager *webrtcmanager.Manager) *Server {
+type SourceSwitchRequest struct {
+	Type string `json:"type"`
+}
+
+func NewServer(port int, webrtcManager *webrtcmanager.Manager, sourceManager *source.Manager) *Server {
 	// Set Gin to release mode for production
 	gin.SetMode(gin.ReleaseMode)
 
@@ -70,6 +82,7 @@ func NewServer(port int, webrtcManager *webrtcmanager.Manager) *Server {
 	server := &Server{
 		port:          port,
 		webrtcManager: webrtcManager,
+		sourceManager: sourceManager,
 		router:        router,
 	}
 
@@ -85,6 +98,8 @@ func (s *Server) setupRoutes() {
 		api.GET("/snapshot", s.handleSnapshot)
 		api.GET("/status", s.handleStatus)
 		api.GET("/peers", s.handlePeers)
+		api.GET("/source", s.handleGetSource)
+		api.POST("/source", s.handleSwitchSource)
 	}
 
 	// Static files
@@ -197,9 +212,7 @@ func (s *Server) handleOffer(c *gin.Context) {
 }
 
 func (s *Server) handleSnapshot(c *gin.Context) {
-	// Get the latest frame from video stream
-	// This is a simplified implementation - in production you'd want to cache frames
-
+	// Check if there are active streams
 	peers := s.webrtcManager.GetAllPeers()
 	if len(peers) == 0 {
 		c.JSON(http.StatusServiceUnavailable, SnapshotResponse{
@@ -209,11 +222,20 @@ func (s *Server) handleSnapshot(c *gin.Context) {
 		return
 	}
 
-	// For now, return a placeholder response
-	// In a real implementation, you'd capture the current frame
+	// Capture snapshot from the latest video frame
+	snapshotData, err := s.webrtcManager.CaptureSnapshot()
+	if err != nil {
+		logrus.Errorf("Failed to capture snapshot: %v", err)
+		c.JSON(http.StatusInternalServerError, SnapshotResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to capture snapshot: %v", err),
+		})
+		return
+	}
+
 	response := SnapshotResponse{
 		Success: true,
-		Data:    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+		Data:    snapshotData,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -231,14 +253,36 @@ func (s *Server) handleStatus(c *gin.Context) {
 			ConnectedPeers: connectedPeers,
 			TotalPeers:     len(peers),
 		},
-		RTMP: struct {
-			Connected bool `json:"connected"`
+		Source: struct {
+			Type      string   `json:"type"`
+			Running   bool     `json:"running"`
+			Available []string `json:"available"`
 		}{
-			Connected: true, // RTMP server is always "connected" when running
+			Type:      s.sourceManager.GetCurrentSource(),
+			Running:   s.sourceManager.IsSourceRunning(),
+			Available: s.sourceManager.GetAvailableSources(),
+		},
+		Streams: struct {
+			RTMP bool `json:"rtmp"`
+			RTSP bool `json:"rtsp"`
+		}{
+			RTMP: s.sourceManager != nil && len(filter(s.sourceManager.GetAvailableSources(), "rtmp")) > 0,
+			RTSP: s.sourceManager != nil && len(filter(s.sourceManager.GetAvailableSources(), "rtsp")) > 0,
 		},
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// helper
+func filter(arr []string, v string) []string {
+	out := make([]string, 0, len(arr))
+	for _, s := range arr {
+		if s == v {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (s *Server) handlePeers(c *gin.Context) {
@@ -256,5 +300,38 @@ func (s *Server) handlePeers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"peers": peerList,
 		"count": len(peers),
+	})
+}
+
+func (s *Server) handleGetSource(c *gin.Context) {
+	response := gin.H{
+		"type":      s.sourceManager.GetCurrentSource(),
+		"running":   s.sourceManager.IsSourceRunning(),
+		"available": s.sourceManager.GetAvailableSources(),
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (s *Server) handleSwitchSource(c *gin.Context) {
+	var req SourceSwitchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Switch source (case-insensitive, with lazy init in manager)
+	if err := s.sourceManager.StartSource(c.Request.Context(), req.Type); err != nil {
+		logrus.Errorf("Failed to switch to %s source: %v", req.Type, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":     fmt.Sprintf("Failed to switch to %s: %v", req.Type, err),
+			"available": s.sourceManager.GetAvailableSources(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Switched to %s source", req.Type),
+		"type":    req.Type,
 	})
 }
