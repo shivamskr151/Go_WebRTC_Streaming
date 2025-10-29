@@ -325,8 +325,12 @@
                     this.pc.ontrack = (event) => {
                         console.log('Received track:', event.track.kind, event.track);
                         if (event.track.kind === 'video') {
-                            console.log('Setting video source object:', event.streams[0]);
-                            this.videoElement.srcObject = event.streams[0];
+                            let stream = event.streams && event.streams[0];
+                            if (!stream) {
+                                stream = new MediaStream();
+                                stream.addTrack(event.track);
+                            }
+                            this.videoElement.srcObject = stream;
                             this.showSuccess('Video track received!');
                         }
                     };
@@ -369,6 +373,11 @@
                     dataChannel.onmessage = (event) => {
                         console.log('Received message:', event.data);
                     };
+
+                    // Explicitly request to RECEIVE media from server
+                    // Without these, the browser's offer won't contain audio/video m-lines
+                    this.pc.addTransceiver('video', { direction: 'recvonly' });
+                    this.pc.addTransceiver('audio', { direction: 'recvonly' });
 
                     // Create offer
                     const offer = await this.pc.createOffer();

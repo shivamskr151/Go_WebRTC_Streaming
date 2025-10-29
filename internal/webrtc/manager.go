@@ -235,13 +235,18 @@ func (m *Manager) HandleOffer(peerID string, offer webrtc.SessionDescription) (*
 
 	logrus.Infof("Local description set successfully for peer %s", peerID)
 
+	// Wait for ICE gathering to complete so the client receives a full, non-trickle SDP
+	iceComplete := webrtc.GatheringCompletePromise(peer.Connection)
+	<-iceComplete
+	local := peer.Connection.LocalDescription()
+
 	// Mark peer as connected after successful SDP negotiation
 	peer.mu.Lock()
 	peer.IsConnected = true
 	peer.mu.Unlock()
 	logrus.Infof("Peer %s marked as connected after SDP negotiation", peerID)
 
-	return &answer, nil
+	return local, nil
 }
 
 func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
