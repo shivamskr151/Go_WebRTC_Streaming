@@ -26,31 +26,40 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceInfo, onSw
   }
 
   return (
-    <div className="mb-8">
-      <h3 className="text-center mb-4 text-gray-800 text-xl font-semibold">🎯 Source Selection</h3>
-      <div className="flex gap-4 justify-center flex-wrap mb-4 md:flex-row flex-col">
+    <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 border border-gray-200 shadow-lg flex-shrink-0">
+      <div className="flex items-center justify-center gap-1.5 mb-2">
+        <span className="text-lg">🎯</span>
+        <h3 className="text-gray-800 text-sm font-bold">Source Selection</h3>
+      </div>
+      <div className="flex gap-2 justify-center flex-wrap mb-2">
         <button
-          className="px-6 py-3 rounded-full text-base font-semibold cursor-pointer transition-all duration-300 uppercase tracking-wide disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none bg-gradient-to-r from-purple-500 to-purple-700 text-white hover:translate-y-[-2px] hover:shadow-lg hover:shadow-purple-500/30 w-full md:w-auto"
+          className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all duration-300 uppercase tracking-wide bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 hover:scale-105 hover:shadow-lg hover:shadow-emerald-500/40 active:scale-95 flex items-center justify-center gap-1"
           onClick={() => onSwitchSource('rtsp')}
         >
-          Switch to RTSP
+          <span className="text-xs">📹</span>
+          <span>RTSP</span>
         </button>
         <button
-          className="px-6 py-3 rounded-full text-base font-semibold cursor-pointer transition-all duration-300 uppercase tracking-wide disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none bg-gradient-to-r from-purple-500 to-purple-700 text-white hover:translate-y-[-2px] hover:shadow-lg hover:shadow-purple-500/30 w-full md:w-auto"
+          className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all duration-300 uppercase tracking-wide bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600 hover:scale-105 hover:shadow-lg hover:shadow-orange-500/40 active:scale-95 flex items-center justify-center gap-1"
           onClick={() => onSwitchSource('rtmp')}
         >
-          Switch to RTMP
+          <span className="text-xs">📺</span>
+          <span>RTMP</span>
         </button>
         <button 
-          className="px-6 py-3 rounded-full text-base font-semibold cursor-pointer transition-all duration-300 uppercase tracking-wide disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none bg-gradient-to-r from-blue-400 to-cyan-400 text-white hover:translate-y-[-2px] hover:shadow-lg hover:shadow-blue-500/30 w-full md:w-auto" 
+          className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all duration-300 uppercase tracking-wide bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:from-blue-600 hover:to-indigo-600 hover:scale-105 hover:shadow-lg hover:shadow-blue-500/40 active:scale-95 flex items-center justify-center gap-1" 
           onClick={onRefresh}
         >
-          Refresh Source Info
+          <span className="text-xs">🔄</span>
+          <span>Refresh</span>
         </button>
       </div>
-      <div className="text-center mt-4 p-3 bg-gray-50 rounded-lg">
-        <span className="block">{getCurrentSourceText()}</span>
-        <small className="text-gray-600">{getAvailableSourcesText()}</small>
+      <div className="text-center p-2 bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex items-center justify-center gap-1.5 mb-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+          <span className="font-semibold text-gray-800 text-xs">{getCurrentSourceText()}</span>
+        </div>
+        <small className="text-gray-600 font-medium text-xs">{getAvailableSourcesText()}</small>
       </div>
     </div>
   )

@@ -85,25 +85,36 @@ const App: React.FC = () => {
   )
 
   return (
-    <div className="bg-white rounded-3xl shadow-2xl p-5 md:p-10 max-w-4xl w-full">
+    <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl p-4 md:p-6 max-w-[95vw] w-full border border-white/20 animate-fade-in h-[95vh] max-h-[95vh] flex flex-col overflow-hidden">
       <Header />
-      <VideoPlayer ref={videoRef} />
-      <StreamControls
-        isConnected={isConnected}
-        isConnecting={isConnecting}
-        onStart={handleStartStream}
-        onStop={handleStopStream}
-        onCaptureSnapshot={handleCaptureSnapshot}
-        onRefreshStatus={updateStatus}
-      />
-      <SourceSelector
-        sourceInfo={sourceInfo}
-        onSwitchSource={handleSwitchSource}
-        onRefresh={updateSourceInfo}
-      />
-      <StatusPanel isConnected={isConnected} status={status} />
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-4 overflow-hidden min-h-0">
+        {/* Left Column - Video Player & Controls */}
+        <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0">
+            <VideoPlayer ref={videoRef} />
+          </div>
+          <StreamControls
+            isConnected={isConnected}
+            isConnecting={isConnecting}
+            onStart={handleStartStream}
+            onStop={handleStopStream}
+            onCaptureSnapshot={handleCaptureSnapshot}
+            onRefreshStatus={updateStatus}
+          />
+          <SnapshotViewer snapshot={snapshot} onClear={() => setSnapshot(null)} />
+        </div>
+        
+        {/* Right Column - Status & Source Selection */}
+        <div className="flex flex-col gap-3 min-h-0 overflow-y-auto">
+          <StatusPanel isConnected={isConnected} status={status} />
+          <SourceSelector
+            sourceInfo={sourceInfo}
+            onSwitchSource={handleSwitchSource}
+            onRefresh={updateSourceInfo}
+          />
+        </div>
+      </div>
       <MessageToast message={message} />
-      <SnapshotViewer snapshot={snapshot} onClear={() => setSnapshot(null)} />
     </div>
   )
 }
