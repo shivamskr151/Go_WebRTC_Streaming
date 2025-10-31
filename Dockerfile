@@ -1,6 +1,23 @@
 # Multi-stage Docker build for Go WebRTC Streaming Server
 
-# Build stage
+# Build React frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/web
+
+# Copy package files
+COPY web/package.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy frontend source
+COPY web/ ./
+
+# Build React app
+RUN npm run build
+
+# Build Go backend
 FROM golang:1.21-alpine AS builder
 
 # Install build dependencies
@@ -17,6 +34,9 @@ RUN go mod download
 
 # Copy source code
 COPY . .
+
+# Copy built React frontend from frontend-builder
+COPY --from=frontend-builder /app/web/dist ./web/dist
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o webrtc-server cmd/server/main.go

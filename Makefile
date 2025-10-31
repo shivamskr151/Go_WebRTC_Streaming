@@ -12,13 +12,31 @@ DOCKER_TAG=latest
 all: deps build
 
 # Install dependencies
-deps:
-	@echo "Installing dependencies..."
+deps: deps-frontend
+	@echo "Installing Go dependencies..."
 	go mod download
 	go mod tidy
 
+# Install frontend dependencies
+deps-frontend:
+	@echo "Installing frontend dependencies..."
+	cd web && npm install
+
+# Build frontend
+build-frontend: deps-frontend
+	@echo "Building React frontend..."
+	cd web && npm run build
+	@echo "Frontend build complete"
+
 # Build the application
-build:
+build: build-frontend
+	@echo "Building $(BINARY_NAME)..."
+	mkdir -p $(BUILD_DIR)
+	go build -o $(BUILD_DIR)/$(BINARY_NAME) cmd/server/main.go
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+# Build only backend (requires frontend to be built separately)
+build-backend:
 	@echo "Building $(BINARY_NAME)..."
 	mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) cmd/server/main.go
@@ -52,11 +70,17 @@ test-coverage:
 	@echo "Coverage report generated: coverage.html"
 
 # Clean build artifacts
-clean:
+clean: clean-frontend
 	@echo "Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
 	go clean
+
+# Clean frontend build artifacts
+clean-frontend:
+	@echo "Cleaning frontend build artifacts..."
+	rm -rf web/dist
+	rm -rf web/node_modules
 
 # Format code
 fmt:
@@ -152,5 +176,8 @@ help:
 	@echo "  security      - Check for security vulnerabilities"
 	@echo "  benchmark     - Run benchmark tests"
 	@echo "  cross-compile - Cross-compile for different platforms"
-	@echo "  deps          - Install dependencies"
+	@echo "  deps          - Install dependencies (Go + Frontend)"
+	@echo "  deps-frontend - Install frontend dependencies only"
+	@echo "  build-frontend - Build React frontend"
+	@echo "  clean-frontend - Clean frontend build artifacts"
 	@echo "  help          - Show this help message"

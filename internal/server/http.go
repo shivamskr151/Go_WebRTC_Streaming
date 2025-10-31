@@ -102,10 +102,20 @@ func (s *Server) setupRoutes() {
 		api.POST("/source", s.handleSwitchSource)
 	}
 
-	// Static files
-	s.router.Static("/static", "./web/static")
-	s.router.LoadHTMLGlob("web/templates/*")
-	s.router.GET("/", s.handleIndex)
+	// Serve React static files
+	s.router.Static("/assets", "./web/dist/assets")
+	s.router.StaticFile("/", "./web/dist/index.html")
+	s.router.StaticFile("/index.html", "./web/dist/index.html")
+
+	// Fallback to index.html for client-side routing
+	s.router.NoRoute(func(c *gin.Context) {
+		// Only serve index.html for non-API routes
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] != "/api" {
+			c.File("./web/dist/index.html")
+		} else {
+			c.Status(http.StatusNotFound)
+		}
+	})
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -165,12 +175,6 @@ func (s *Server) Stop() error {
 	s.isRunning = false
 	logrus.Info("HTTP server stopped")
 	return nil
-}
-
-func (s *Server) handleIndex(c *gin.Context) {
-	c.HTML(http.StatusOK, "index.html", gin.H{
-		"title": "Go WebRTC Streaming",
-	})
 }
 
 func (s *Server) handleOffer(c *gin.Context) {
