@@ -101,10 +101,9 @@ const App: React.FC = () => {
             onCaptureSnapshot={handleCaptureSnapshot}
             onRefreshStatus={updateStatus}
           />
-          <SnapshotViewer snapshot={snapshot} onClear={() => setSnapshot(null)} />
         </div>
         
-        {/* Right Column - Status & Source Selection */}
+        {/* Right Column - Status, Source Selection & Snapshot */}
         <div className="flex flex-col gap-3 min-h-0 overflow-y-auto">
           <StatusPanel isConnected={isConnected} status={status} />
           <SourceSelector
@@ -112,6 +111,7 @@ const App: React.FC = () => {
             onSwitchSource={handleSwitchSource}
             onRefresh={updateSourceInfo}
           />
+          <SnapshotViewer snapshot={snapshot} onClear={() => setSnapshot(null)} />
         </div>
       </div>
       <MessageToast message={message} />
