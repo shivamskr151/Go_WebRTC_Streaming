@@ -104,14 +104,16 @@ const App: React.FC = () => {
         </div>
         
         {/* Right Column - Status, Source Selection & Snapshot */}
-        <div className="flex flex-col gap-3 min-h-0 overflow-y-auto">
+        <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
           <StatusPanel isConnected={isConnected} status={status} />
           <SourceSelector
             sourceInfo={sourceInfo}
             onSwitchSource={handleSwitchSource}
             onRefresh={updateSourceInfo}
           />
-          <SnapshotViewer snapshot={snapshot} onClear={() => setSnapshot(null)} />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <SnapshotViewer snapshot={snapshot} onClear={() => setSnapshot(null)} />
+          </div>
         </div>
       </div>
       <MessageToast message={message} />

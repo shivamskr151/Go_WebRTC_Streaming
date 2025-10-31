@@ -33,7 +33,7 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({ snapshot, onClea
 
   if (!snapshot) {
     return (
-      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 border border-gray-200 shadow-lg flex-shrink-0 flex items-center justify-center min-h-[120px]">
+      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 border border-gray-200 shadow-lg h-full flex items-center justify-center">
         <p className="text-gray-400 text-xs font-medium">No snapshot captured</p>
       </div>
     )
@@ -41,7 +41,7 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({ snapshot, onClea
 
   return (
     <>
-      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 border border-gray-200 shadow-lg flex-shrink-0">
+      <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 border border-gray-200 shadow-lg h-full flex flex-col overflow-hidden">
         <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-1.5">
             <span className="text-lg">📸</span>
@@ -58,13 +58,13 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({ snapshot, onClea
           )}
         </div>
         <div 
-          className="relative rounded-lg overflow-hidden border-2 border-white shadow-lg w-full cursor-pointer transition-transform duration-300 hover:scale-105"
+          className="relative rounded-lg overflow-hidden border-2 border-white shadow-lg w-full flex-1 min-h-0 cursor-pointer transition-transform duration-300 hover:scale-105"
           onClick={() => setIsExpanded(true)}
         >
           <img 
             src={snapshot} 
             alt="Snapshot" 
-            className="w-full h-auto block object-contain max-h-[200px] mx-auto pointer-events-none"
+            className="w-full h-full object-contain pointer-events-none"
           />
           <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors duration-300 flex items-center justify-center">
             <span className="opacity-0 hover:opacity-100 text-white text-xs font-semibold bg-black/50 px-2 py-1 rounded transition-opacity">
