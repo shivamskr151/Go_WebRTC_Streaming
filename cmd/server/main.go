@@ -40,9 +40,14 @@ func main() {
 	// Initialize WebRTC manager
 	webrtcManager := webrtc.NewManager()
 
-	// Initialize source manager
+	// Initialize source manager with MediaMTX configuration
+	// MediaMTX ingests from cameras, we pull optimized streams from MediaMTX
 	sourceManager := source.NewManager(webrtcManager)
-	sourceManager.InitializeSources(cfg.RTMP.URL, cfg.RTSP.URL)
+	sourceManager.InitializeSources(
+		cfg.MediaMTX.Host,
+		cfg.MediaMTX.RTSPPort,
+		cfg.MediaMTX.RTMPPort,
+	)
 
 	// Initialize RTMP server
 	rtmpServer := rtmp.NewServer(cfg.RTMP.Port, webrtcManager)
@@ -52,14 +57,23 @@ func main() {
 
 	// Start all configured sources, select active type if provided
 	sourceManager.StartAll(ctx)
+
+	// Set default active source - prefer RTSP for MediaMTX
+	defaultSource := "rtsp"
 	if cfg.Source.Type != "" {
-		if err := sourceManager.SetActiveSource(cfg.Source.Type); err != nil {
-			logrus.Warnf("Failed to set active source from config: %v", err)
+		defaultSource = cfg.Source.Type
+	} else if cfg.RTMP.URL != "" && cfg.RTSP.URL == "" {
+		defaultSource = "rtmp"
+	}
+
+	if err := sourceManager.SetActiveSource(defaultSource); err != nil {
+		logrus.Warnf("Failed to set active source: %v", err)
+	} else {
+		logrus.Infof("✅ Active source set to: %s", defaultSource)
+		// Start the active source
+		if err := sourceManager.StartSource(ctx, defaultSource); err != nil {
+			logrus.Warnf("Failed to start default source %s: %v", defaultSource, err)
 		}
-	} else if cfg.RTSP.URL != "" {
-		_ = sourceManager.SetActiveSource("rtsp")
-	} else if cfg.RTMP.URL != "" {
-		_ = sourceManager.SetActiveSource("rtmp")
 	}
 
 	// Start RTMP server
@@ -97,16 +111,22 @@ func printStartupInfo(cfg *config.Config) {
 	fmt.Println("=====================================")
 	fmt.Printf("📡 HTTP Server: http://localhost:%d\n", cfg.HTTP.Port)
 	fmt.Printf("📺 RTMP Server: rtmp://localhost:%d/live\n", cfg.RTMP.Port)
+	fmt.Printf("🎬 MediaMTX Host: %s:%d (RTSP), %s:%d (RTMP)\n",
+		cfg.MediaMTX.Host, cfg.MediaMTX.RTSPPort,
+		cfg.MediaMTX.Host, cfg.MediaMTX.RTMPPort)
 
-	// Show available sources
+	// Show MediaMTX URLs (where Go server pulls from)
+	fmt.Printf("📥 Pulling RTMP from MediaMTX: rtmp://%s:%d/live\n",
+		cfg.MediaMTX.Host, cfg.MediaMTX.RTMPPort)
+	fmt.Printf("📥 Pulling RTSP from MediaMTX: rtsp://%s:%d/live\n",
+		cfg.MediaMTX.Host, cfg.MediaMTX.RTSPPort)
+
+	// Show original camera sources (where MediaMTX ingests from)
 	if cfg.RTMP.URL != "" {
-		fmt.Printf("📹 RTMP Source: %s\n", cfg.RTMP.URL)
+		fmt.Printf("📹 Camera RTMP (→ MediaMTX): %s\n", cfg.RTMP.URL)
 	}
 	if cfg.RTSP.URL != "" {
-		fmt.Printf("📹 RTSP Source: %s\n", cfg.RTSP.URL)
-	}
-	if cfg.Source.URL != "" {
-		fmt.Printf("🎯 Active Source: %s (%s)\n", cfg.Source.Type, cfg.Source.URL)
+		fmt.Printf("📹 Camera RTSP (→ MediaMTX): %s\n", cfg.RTSP.URL)
 	}
 
 	fmt.Println("🌐 Web Client: http://localhost:8080")

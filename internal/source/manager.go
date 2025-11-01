@@ -17,8 +17,11 @@ type Manager struct {
 	rtmpClient    *rtmp.RTMPClient
 	rtspClient    *rtsp.Client
 	currentSource string
-	rtmpURL       string
-	rtspURL       string
+	rtmpURL       string // MediaMTX RTMP URL (from MediaMTX)
+	rtspURL       string // MediaMTX RTSP URL (from MediaMTX)
+	mediamtxHost  string
+	mediamtxRTSPPort int
+	mediamtxRTMPPort int
 	mu            sync.RWMutex
 }
 
@@ -29,30 +32,38 @@ func NewManager(webrtcManager *webrtc.Manager) *Manager {
 	}
 }
 
-func (m *Manager) InitializeSources(rtmpURL, rtspURL string) {
+// InitializeSources initializes sources with MediaMTX URLs
+// mediamtxHost: MediaMTX server host (e.g., "mediamtx" or "localhost")
+// mediamtxRTSPPort: MediaMTX RTSP port (default 8554)
+// mediamtxRTMPPort: MediaMTX RTMP port (default 1935)
+func (m *Manager) InitializeSources(mediamtxHost string, mediamtxRTSPPort, mediamtxRTMPPort int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.rtmpURL = rtmpURL
-	m.rtspURL = rtspURL
+	m.mediamtxHost = mediamtxHost
+	m.mediamtxRTSPPort = mediamtxRTSPPort
+	m.mediamtxRTMPPort = mediamtxRTMPPort
 
-	if rtmpURL != "" {
-		m.rtmpClient = rtmp.NewClient(rtmpURL, m.webrtcManager, func() bool {
+	// Build MediaMTX URLs - pulling from MediaMTX optimized streams
+	// MediaMTX path "live" is configured in mediamtx.yml for RTMP ingest
+	m.rtmpURL = fmt.Sprintf("rtmp://%s:%d/live", mediamtxHost, mediamtxRTMPPort)
+	m.rtspURL = fmt.Sprintf("rtsp://%s:%d/live", mediamtxHost, mediamtxRTSPPort)
+
+	// Initialize RTMP client to pull from MediaMTX
+	m.rtmpClient = rtmp.NewClient(m.rtmpURL, m.webrtcManager, func() bool {
 			m.mu.RLock()
 			defer m.mu.RUnlock()
 			return m.currentSource == "rtmp"
 		})
-		logrus.Infof("Initialized RTMP client with URL: %s", rtmpURL)
-	}
+	logrus.Infof("Initialized RTMP client pulling from MediaMTX: %s", m.rtmpURL)
 
-	if rtspURL != "" {
-		m.rtspClient = rtsp.NewClient(rtspURL, m.webrtcManager, func() bool {
+	// Initialize RTSP client to pull from MediaMTX
+	m.rtspClient = rtsp.NewClient(m.rtspURL, m.webrtcManager, func() bool {
 			m.mu.RLock()
 			defer m.mu.RUnlock()
 			return m.currentSource == "rtsp"
 		})
-		logrus.Infof("Initialized RTSP client with URL: %s", rtspURL)
-	}
+	logrus.Infof("Initialized RTSP client pulling from MediaMTX: %s", m.rtspURL)
 }
 
 func (m *Manager) StartSource(ctx context.Context, sourceType string) error {

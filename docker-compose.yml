@@ -1,20 +1,72 @@
-version: '3.8'
-
 services:
+  # MediaMTX - handles camera ingestion and provides optimized streams
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    ports:
+      - "8554:8554"  # RTSP server
+      - "1935:1935"  # RTMP server
+      - "8888:8888"  # HTTP API / HLS
+      - "8889:8889"  # WebRTC
+      - "9998:9998"  # Metrics
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8888/v3/config/global/get || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - webrtc-network
+
+  # FFmpeg bridge - pulls from RTMP source and pushes to MediaMTX
+  rtmp-bridge:
+    image: jrottenberg/ffmpeg:latest
+    container_name: rtmp-bridge
+    command:
+      - -re
+      - -i
+      - "rtmp://safetycaptain.arresto.in/camera_0051/0051?username=wrakash&password=akash@1997"
+      - -c
+      - copy
+      - -f
+      - flv
+      - "rtmp://mediamtx:1935/live"
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    networks:
+      - webrtc-network
+
+  # Go WebRTC Server - pulls from MediaMTX and serves WebRTC
   webrtc-server:
     build: .
     ports:
-      - "8080:8080"  # HTTP server
-      - "1935:1935"  # RTMP server
+      - "8081:8081"  # HTTP server
+      - "1936:1936"  # RTMP server (for local ingest if needed)
+      - "10000-10010:10000-10010/udp"  # WebRTC UDP ports (ICE candidates)
+    depends_on:
+      - mediamtx
     environment:
-      - HTTP_PORT=8080
-      - RTMP_PORT=1935
+      - HTTP_PORT=8081
+      - RTMP_PORT=1936
+      # MediaMTX configuration - use mediamtx hostname in Docker network
+      - MEDIAMTX_HOST=mediamtx
+      - MEDIAMTX_RTSP_PORT=8554
+      - MEDIAMTX_RTMP_PORT=1935
+      # Original camera URLs (MediaMTX will ingest from these)
+      # Set these to tell MediaMTX where cameras are (if using RTSP pull)
+      - RTSP_URL=  # Optional: rtsp://camera-url if MediaMTX should pull RTSP
       - RTMP_URL=rtmp://safetycaptain.arresto.in/camera_0051/0051?username=wrakash&password=akash@1997
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - webrtc-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/status"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -38,5 +90,5 @@ services:
       - monitoring
 
 networks:
-  default:
-    name: webrtc-network
+  webrtc-network:
+    driver: bridge

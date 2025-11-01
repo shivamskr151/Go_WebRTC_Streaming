@@ -7,12 +7,19 @@ WORKDIR /app/web
 
 # Copy package files
 COPY web/package.json ./
+COPY web/package-lock.json* ./
 
 # Install dependencies
 RUN npm install
 
-# Copy frontend source
-COPY web/ ./
+# Copy frontend source (exclude node_modules)
+COPY web/src ./src
+COPY web/index.html ./
+COPY web/tailwind.config.js ./
+COPY web/postcss.config.js ./
+COPY web/tsconfig.json ./
+COPY web/tsconfig.node.json ./
+COPY web/vite.config.ts ./
 
 # Build React app
 RUN npm run build

@@ -100,6 +100,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/peers", s.handlePeers)
 		api.GET("/source", s.handleGetSource)
 		api.POST("/source", s.handleSwitchSource)
+		api.GET("/debug", s.handleDebug)
 	}
 
 	// Serve React static files
@@ -189,6 +190,41 @@ func (s *Server) handleOffer(c *gin.Context) {
 
 	// Generate peer ID
 	peerID := fmt.Sprintf("peer_%d", time.Now().UnixNano())
+
+	// Ensure video source is running when first peer connects
+	// Default to RTSP as it's more reliable for MediaMTX
+	currentSource := s.sourceManager.GetCurrentSource()
+	if currentSource == "" {
+		// No source set, default to RTSP
+		currentSource = "rtsp"
+	}
+
+	// Start source if not running
+	if !s.sourceManager.IsSourceRunning() {
+		logrus.Infof("Starting source %s for new peer connection", currentSource)
+		if err := s.sourceManager.StartSource(c.Request.Context(), currentSource); err != nil {
+			logrus.Errorf("Failed to start source %s: %v", currentSource, err)
+			// Try RTSP as fallback if current source failed
+			if currentSource != "rtsp" {
+				logrus.Infof("Attempting RTSP as fallback")
+				if err := s.sourceManager.StartSource(c.Request.Context(), "rtsp"); err != nil {
+					logrus.Errorf("Failed to start RTSP source: %v", err)
+					c.JSON(http.StatusServiceUnavailable, gin.H{
+						"error": fmt.Sprintf("Video source unavailable. RTSP error: %v", err),
+					})
+					return
+				}
+				currentSource = "rtsp"
+			} else {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error": fmt.Sprintf("Failed to start video source: %v", err),
+				})
+				return
+			}
+		}
+		// Give source a moment to start streaming
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// Create peer
 	_, err := s.webrtcManager.CreatePeer(peerID)
@@ -337,5 +373,42 @@ func (s *Server) handleSwitchSource(c *gin.Context) {
 		"success": true,
 		"message": fmt.Sprintf("Switched to %s source", req.Type),
 		"type":    req.Type,
+	})
+}
+
+func (s *Server) handleDebug(c *gin.Context) {
+	peers := s.webrtcManager.GetAllPeers()
+	connectedPeers := s.webrtcManager.GetConnectedPeersCount()
+
+	peerDetails := make([]gin.H, 0, len(peers))
+	for id, peer := range peers {
+		connState := "unknown"
+		iceState := "unknown"
+		hasVideoTrack := peer.VideoTrack != nil
+		isConnected := peer.IsConnected
+		if peer.Connection != nil {
+			connState = peer.Connection.ConnectionState().String()
+			iceState = peer.Connection.ICEConnectionState().String()
+		}
+		peerDetails = append(peerDetails, gin.H{
+			"id":               id,
+			"has_video_track":  hasVideoTrack,
+			"connection_state": connState,
+			"ice_state":        iceState,
+			"is_connected":     isConnected,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"webrtc": gin.H{
+			"total_peers":     len(peers),
+			"connected_peers": connectedPeers,
+			"peers":           peerDetails,
+		},
+		"source": gin.H{
+			"type":      s.sourceManager.GetCurrentSource(),
+			"running":   s.sourceManager.IsSourceRunning(),
+			"available": s.sourceManager.GetAvailableSources(),
+		},
 	})
 }

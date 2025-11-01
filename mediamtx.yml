@@ -1,0 +1,32 @@
+logLevel: info
+logDestinations:
+  - stdout
+
+rtsp: yes
+rtspTransports:
+  - tcp
+  - udp
+rtspEncryption: "no"
+rtspAddress: :8554
+
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+hlsEncryption: no
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+
+paths:
+  live:
+    # Accept RTMP publisher (cameras can push to rtmp://mediamtx:1935/live)
+    # OR configure RTMP pull via MediaMTX API after startup
+    source: publisher
+    sourceOnDemand: no
+
+
+metrics: yes
+metricsAddress: :9998

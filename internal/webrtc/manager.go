@@ -35,7 +35,6 @@ type Peer struct {
 	Connection  *webrtc.PeerConnection
 	VideoTrack  *webrtc.TrackLocalStaticSample
 	AudioTrack  *webrtc.TrackLocalStaticSample
-	DataChannel *webrtc.DataChannel
 	IsConnected bool
 	mu          sync.RWMutex
 }
@@ -64,40 +63,21 @@ func (m *Manager) CreatePeer(peerID string) (*Peer, error) {
 	m.peersLock.Lock()
 	defer m.peersLock.Unlock()
 
-	// Create WebRTC configuration optimized for local development
+	// Create WebRTC configuration optimized for connection establishment
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
+			// Use Google STUN for NAT traversal
 			{
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 			{
 				URLs: []string{"stun:stun1.l.google.com:19302"},
 			},
-			{
-				URLs: []string{"stun:stun2.l.google.com:19302"},
-			},
-			{
-				URLs: []string{"stun:stun3.l.google.com:19302"},
-			},
-			{
-				URLs: []string{"stun:stun4.l.google.com:19302"},
-			},
-			// Local TURN server for development
-			{
-				URLs:       []string{"turn:127.0.0.1:3478"},
-				Username:   "webrtc",
-				Credential: "webrtc123",
-			},
-			{
-				URLs:       []string{"turn:127.0.0.1:3478"},
-				Username:   "test",
-				Credential: "test123",
-			},
 		},
-		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
-		BundlePolicy:         webrtc.BundlePolicyBalanced,
+		ICETransportPolicy:   webrtc.ICETransportPolicyAll, // Allow all candidate types
+		BundlePolicy:         webrtc.BundlePolicyMaxCompat, // More compatible
 		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyRequire,
-		ICECandidatePoolSize: 10,
+		ICECandidatePoolSize: 0, // Disable candidate pool for faster connection
 	}
 
 	// Create peer connection
@@ -145,37 +125,126 @@ func (m *Manager) CreatePeer(peerID string) (*Peer, error) {
 		return nil, fmt.Errorf("failed to add audio track: %w", err)
 	}
 
-	// Create data channel for signaling
-	dataChannel, err := peerConnection.CreateDataChannel("signaling", nil)
-	if err != nil {
-		logrus.Warnf("Failed to create data channel: %v", err)
-	}
+	// Data channel not needed for media-only connections
+	// Removed to avoid potential connection issues
 
 	peer := &Peer{
 		ID:          peerID,
 		Connection:  peerConnection,
 		VideoTrack:  videoTrack,
 		AudioTrack:  audioTrack,
-		DataChannel: dataChannel,
 		IsConnected: false,
 	}
 
-	// Set up connection state change handler
+	// Set up connection state change handler with detailed logging
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		iceState := peerConnection.ICEConnectionState()
+		logrus.Infof("Peer %s connection state: %s (ICE: %s)", peerID, state.String(), iceState.String())
+
 		peer.mu.Lock()
-		peer.IsConnected = (state == webrtc.PeerConnectionStateConnected)
+		// Only mark as connected if both connection and ICE are established
+		peer.IsConnected = (state == webrtc.PeerConnectionStateConnected) &&
+			(iceState == webrtc.ICEConnectionStateConnected || iceState == webrtc.ICEConnectionStateCompleted)
+		isConnected := peer.IsConnected
 		peer.mu.Unlock()
 
-		logrus.Infof("Peer %s connection state: %s", peerID, state.String())
-
-		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
+		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			logrus.Infof("✅ Peer %s PeerConnection is CONNECTED (ICE: %s)", peerID, iceState.String())
+			if isConnected {
+				logrus.Infof("🎉 Peer %s is fully connected and ready for media!", peerID)
+			}
+		case webrtc.PeerConnectionStateConnecting:
+			logrus.Infof("🔄 Peer %s PeerConnection is CONNECTING (ICE: %s)", peerID, iceState.String())
+		case webrtc.PeerConnectionStateDisconnected:
+			logrus.Warnf("⚠️ Peer %s PeerConnection DISCONNECTED (ICE: %s)", peerID, iceState.String())
+			// Give it time to recover - don't remove immediately
+		case webrtc.PeerConnectionStateFailed:
+			logrus.Errorf("❌ Peer %s PeerConnection FAILED (ICE: %s)", peerID, iceState.String())
+			// Remove peer on failure after a delay
+			go func() {
+				time.Sleep(5 * time.Second)
+				if peer.Connection != nil &&
+					peer.Connection.ConnectionState() == webrtc.PeerConnectionStateFailed {
+					logrus.Warnf("Removing failed peer %s", peerID)
+					m.RemovePeer(peerID)
+				}
+			}()
+		case webrtc.PeerConnectionStateClosed:
+			logrus.Infof("🔒 Peer %s PeerConnection CLOSED", peerID)
 			m.RemovePeer(peerID)
+		case webrtc.PeerConnectionStateNew:
+			logrus.Infof("🆕 Peer %s PeerConnection NEW", peerID)
 		}
 	})
 
 	// Set up ICE connection state change handler
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		logrus.Infof("Peer %s ICE connection state: %s", peerID, state.String())
+
+		// Handle connection states
+		switch state {
+		case webrtc.ICEConnectionStateConnected:
+			logrus.Infof("✅ Peer %s ICE connection established", peerID)
+			peer.mu.Lock()
+			peer.IsConnected = true
+			peer.mu.Unlock()
+		case webrtc.ICEConnectionStateCompleted:
+			logrus.Infof("✅ Peer %s ICE connection completed", peerID)
+			peer.mu.Lock()
+			peer.IsConnected = true
+			peer.mu.Unlock()
+		case webrtc.ICEConnectionStateDisconnected:
+			logrus.Warnf("⚠️ Peer %s ICE connection disconnected - may recover", peerID)
+			peer.mu.Lock()
+			peer.IsConnected = false
+			peer.mu.Unlock()
+
+			// Log connection state for debugging
+			if peer.Connection != nil {
+				logrus.Warnf("Peer %s states: PeerConnection=%s, ICE=%s",
+					peerID,
+					peer.Connection.ConnectionState().String(),
+					state.String())
+			}
+
+			// Don't remove peer immediately - give it time to recover
+			// ICE disconnection can be transient
+			go func() {
+				time.Sleep(5 * time.Second)
+				if peer.Connection != nil {
+					currentICEState := peer.Connection.ICEConnectionState()
+					if currentICEState == webrtc.ICEConnectionStateDisconnected ||
+						currentICEState == webrtc.ICEConnectionStateFailed {
+						logrus.Warnf("Peer %s still disconnected after 5s, state=%s", peerID, currentICEState.String())
+					}
+				}
+			}()
+		case webrtc.ICEConnectionStateFailed:
+			logrus.Errorf("❌ Peer %s ICE connection failed", peerID)
+			peer.mu.Lock()
+			peer.IsConnected = false
+			peer.mu.Unlock()
+			// Attempt ICE restart
+			go func() {
+				time.Sleep(2 * time.Second)
+				if peer.Connection != nil && peer.Connection.ConnectionState() != webrtc.PeerConnectionStateClosed {
+					logrus.Infof("Attempting ICE restart for peer %s", peerID)
+					if offer, err := peer.Connection.CreateOffer(&webrtc.OfferOptions{ICERestart: true}); err == nil {
+						if err := peer.Connection.SetLocalDescription(offer); err == nil {
+							logrus.Infof("ICE restart offer created for peer %s", peerID)
+						}
+					}
+				}
+			}()
+		case webrtc.ICEConnectionStateChecking:
+			logrus.Infof("🔍 Peer %s ICE connection checking...", peerID)
+		case webrtc.ICEConnectionStateNew:
+			logrus.Infof("🆕 Peer %s ICE connection new", peerID)
+		case webrtc.ICEConnectionStateClosed:
+			logrus.Infof("🔒 Peer %s ICE connection closed", peerID)
+			m.RemovePeer(peerID)
+		}
 	})
 
 	// Set up ICE candidate handler for local development
@@ -250,24 +319,66 @@ func (m *Manager) HandleOffer(peerID string, offer webrtc.SessionDescription) (*
 	logrus.Infof("Local description set successfully for peer %s", peerID)
 
 	// Wait for ICE gathering to complete so the client receives a full, non-trickle SDP
+	// Use a timeout to avoid hanging if ICE gathering fails
 	iceComplete := webrtc.GatheringCompletePromise(peer.Connection)
-	<-iceComplete
-	local := peer.Connection.LocalDescription()
+	timeout := time.NewTimer(10 * time.Second)
+	defer timeout.Stop()
 
-	// Mark peer as connected after successful SDP negotiation
-	peer.mu.Lock()
-	peer.IsConnected = true
-	peer.mu.Unlock()
-	logrus.Infof("Peer %s marked as connected after SDP negotiation", peerID)
+	select {
+	case <-iceComplete:
+		logrus.Infof("ICE gathering completed for peer %s", peerID)
+	case <-timeout.C:
+		logrus.Warnf("ICE gathering timeout for peer %s, proceeding with current candidates", peerID)
+	}
+
+	local := peer.Connection.LocalDescription()
+	if local == nil {
+		return nil, fmt.Errorf("local description is nil after ICE gathering")
+	}
+
+	// Don't mark as connected here - wait for actual ICE connection
+	// The connection state will be updated by the ICE connection state change handler
+	logrus.Infof("✅ SDP negotiation complete for peer %s, waiting for ICE connection...", peerID)
 
 	return local, nil
 }
 
 func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
+	if len(data) == 0 {
+		logrus.Debugf("Empty video sample received")
+		return
+	}
+
+	m.peersLock.RLock()
+	peerCount := len(m.peers)
+	connectedPeers := 0
+	for _, peer := range m.peers {
+		peer.mu.RLock()
+		if peer.Connection != nil &&
+			(peer.Connection.ConnectionState() == webrtc.PeerConnectionStateConnected ||
+				peer.Connection.ConnectionState() == webrtc.PeerConnectionStateConnecting) {
+			connectedPeers++
+		}
+		peer.mu.RUnlock()
+	}
+	m.peersLock.RUnlock()
+
+	if peerCount == 0 {
+		// No peers connected, nothing to do
+		logrus.Debugf("No peers connected, dropping video sample (size: %d)", len(data))
+		return
+	}
+
+	if connectedPeers == 0 {
+		logrus.Debugf("No connected peers, dropping video sample (size: %d, total peers: %d)", len(data), peerCount)
+		return
+	}
+
+	logrus.Debugf("📹 Writing video sample: size=%d, timestamp=%d, total_peers=%d, connected_peers=%d",
+		len(data), timestamp, peerCount, connectedPeers)
+
 	m.peersLock.RLock()
 	defer m.peersLock.RUnlock()
-
-	logrus.Debugf("Writing video sample: size=%d, timestamp=%d, peers=%d", len(data), timestamp, len(m.peers))
 
 	// Check if data has valid H.264 start codes
 	if len(data) >= 4 {
@@ -303,42 +414,136 @@ func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
 		return
 	}
 
-	logrus.Debugf("Parsed %d NAL units from video sample", len(nalUnits))
+	if len(nalUnits) == 0 {
+		logrus.Warnf("No NAL units found in video sample (size: %d bytes). First bytes: %02x %02x %02x %02x",
+			len(data),
+			safeByte(data, 0), safeByte(data, 1), safeByte(data, 2), safeByte(data, 3))
+		return
+	}
+
+	logrus.Debugf("Parsed %d NAL units from video sample (total size: %d)", len(nalUnits), len(data))
+
+	// Track if any peers received data
+	anyPeerReceived := false
 
 	for _, peer := range m.peers {
 		peer.mu.RLock()
 		hasVideoTrack := peer.VideoTrack != nil
+		isConnected := peer.IsConnected
+		peerConnection := peer.Connection
 		peer.mu.RUnlock()
 
-		if hasVideoTrack {
-			// Send each NAL unit as a separate sample
-			for i, nalUnit := range nalUnits {
-				if len(nalUnit) == 0 {
-					continue
-				}
+		if !hasVideoTrack {
+			logrus.Debugf("Peer %s has no video track, skipping", peer.ID)
+			continue
+		}
 
-				// Log NAL unit type for debugging
-				if len(nalUnit) > 0 {
-					nalType := nalUnit[0] & 0x1F
-					logrus.Debugf("NAL unit %d: type=%d, size=%d", i, nalType, len(nalUnit))
-				}
+		// Check actual connection state - don't rely only on IsConnected flag
+		if peerConnection != nil {
+			connectionState := peerConnection.ConnectionState()
+			iceConnectionState := peerConnection.ICEConnectionState()
 
-				sample := media.Sample{
-					Data:     nalUnit,
-					Duration: time.Millisecond * 33, // ~30fps
-				}
-				if timestamp > 0 {
-					sample.PacketTimestamp = timestamp
-				}
+			// Only send if connection is actually established
+			if connectionState != webrtc.PeerConnectionStateConnected &&
+				connectionState != webrtc.PeerConnectionStateConnecting {
+				logrus.Debugf("Peer %s connection state is %s, skipping video sample", peer.ID, connectionState.String())
+				continue
+			}
 
-				if err := peer.VideoTrack.WriteSample(sample); err != nil {
-					logrus.Errorf("Failed to write video sample to peer %s: %v", peer.ID, err)
-				} else {
-					logrus.Debugf("Successfully wrote NAL unit to peer %s: size=%d", peer.ID, len(nalUnit))
-				}
+			// Allow sending during 'checking' to establish connection faster
+			// Also allow during 'connected' and 'completed'
+			if iceConnectionState != webrtc.ICEConnectionStateConnected &&
+				iceConnectionState != webrtc.ICEConnectionStateCompleted &&
+				iceConnectionState != webrtc.ICEConnectionStateChecking {
+				logrus.Debugf("Peer %s ICE state is %s, skipping video sample", peer.ID, iceConnectionState.String())
+				continue
 			}
 		}
+
+		// Send each NAL unit as a separate sample
+		writtenCount := 0
+
+		// Log state for debugging first frame
+		logrus.Debugf("Peer %s sending video: PeerConnection=%s, ICE=%s",
+			peer.ID,
+			peerConnection.ConnectionState().String(),
+			peerConnection.ICEConnectionState().String())
+		for i, nalUnit := range nalUnits {
+			if len(nalUnit) == 0 {
+				continue
+			}
+
+			// Validate NAL unit (must have at least 1 byte for header)
+			if len(nalUnit) < 1 {
+				logrus.Warnf("NAL unit %d is too short (size: %d)", i, len(nalUnit))
+				continue
+			}
+
+			// Log NAL unit type for first few frames
+			nalType := nalUnit[0] & 0x1F
+			if writtenCount == 0 && i < 5 {
+				logrus.Infof("📤 Writing NAL unit %d: type=%d (0x%02x), size=%d, peer=%s, connected=%v",
+					i, nalType, nalUnit[0], len(nalUnit), peer.ID, isConnected)
+			}
+
+			// Calculate duration based on NAL type
+			// I-frames might take longer, P/B frames are quicker
+			duration := time.Millisecond * 33 // Default ~30fps
+			if nalType == 5 {                 // IDR frame
+				duration = time.Millisecond * 100 // IDR frames are keyframes
+			}
+
+			sample := media.Sample{
+				Data:     nalUnit,
+				Duration: duration,
+			}
+			if timestamp > 0 {
+				sample.PacketTimestamp = timestamp
+			}
+
+			if err := peer.VideoTrack.WriteSample(sample); err != nil {
+				logrus.Errorf("❌ Failed to write video sample to peer %s: %v", peer.ID, err)
+			} else {
+				writtenCount++
+				anyPeerReceived = true
+			}
+		}
+
+		if writtenCount > 0 {
+			logrus.Infof("✅ Wrote %d NAL units to peer %s (total sample size: %d)", writtenCount, peer.ID, len(data))
+		} else if len(nalUnits) > 0 {
+			logrus.Warnf("⚠️ No NAL units written to peer %s (had %d NAL units)", peer.ID, len(nalUnits))
+		}
 	}
+
+	if !anyPeerReceived && len(m.peers) > 0 {
+		logrus.Warnf("⚠️ No peers received video data (peers: %d, sample size: %d)", len(m.peers), len(data))
+		// Log peer states for debugging
+		m.peersLock.RLock()
+		for id, peer := range m.peers {
+			peer.mu.RLock()
+			connState := "unknown"
+			iceState := "unknown"
+			hasTrack := peer.VideoTrack != nil
+			if peer.Connection != nil {
+				connState = peer.Connection.ConnectionState().String()
+				iceState = peer.Connection.ICEConnectionState().String()
+			}
+			logrus.Warnf("  Peer %s: track=%v, conn=%s, ice=%s", id, hasTrack, connState, iceState)
+			peer.mu.RUnlock()
+		}
+		m.peersLock.RUnlock()
+	} else if anyPeerReceived {
+		logrus.Debugf("✅ Video sample successfully sent to peers (size: %d)", len(data))
+	}
+}
+
+// safeByte safely gets a byte at index, returns 0 if out of bounds
+func safeByte(data []byte, idx int) byte {
+	if idx >= 0 && idx < len(data) {
+		return data[idx]
+	}
+	return 0
 }
 
 func (m *Manager) WriteAudioSample(data []byte, timestamp uint32) {

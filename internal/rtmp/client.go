@@ -51,10 +51,11 @@ func (c *RTMPClient) Start(ctx context.Context) error {
 	for retries := 0; retries < 3; retries++ {
 		logrus.Infof("Attempting RTMP connection (attempt %d): %s", retries+1, c.url)
 
-		// Use FFmpeg to convert RTMP to H.264 stream
+		// MediaMTX provides optimized H.264 streams
+		// Copy without transcoding for lowest latency
 		cmd = exec.CommandContext(ctx, "ffmpeg",
 			"-i", c.url,
-			"-c", "copy", // copy all streams
+			"-c:v", "copy", // Copy video (no transcoding - MediaMTX handles it)
 			"-f", "h264", // output H.264 format
 			"-an", // no audio
 			"pipe:1",

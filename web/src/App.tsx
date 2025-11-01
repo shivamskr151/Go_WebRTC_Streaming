@@ -91,7 +91,11 @@ const App: React.FC = () => {
         {/* Left Column - Video Player & Controls */}
         <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
           <div className="flex-1 min-h-0">
-            <VideoPlayer ref={videoRef} />
+            <VideoPlayer 
+              ref={videoRef} 
+              isConnected={isConnected}
+              isConnecting={isConnecting}
+            />
           </div>
           <StreamControls
             isConnected={isConnected}

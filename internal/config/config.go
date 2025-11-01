@@ -6,10 +6,11 @@ import (
 )
 
 type Config struct {
-	HTTP   HTTPConfig   `json:"http"`
-	RTMP   RTMPConfig   `json:"rtmp"`
-	RTSP   RTSPConfig   `json:"rtsp"`
-	Source SourceConfig `json:"source"`
+	HTTP     HTTPConfig     `json:"http"`
+	RTMP     RTMPConfig     `json:"rtmp"`
+	RTSP     RTSPConfig     `json:"rtsp"`
+	Source   SourceConfig   `json:"source"`
+	MediaMTX MediaMTXConfig `json:"mediamtx"`
 }
 
 type HTTPConfig struct {
@@ -30,6 +31,12 @@ type SourceConfig struct {
 	URL  string `json:"url"`
 }
 
+type MediaMTXConfig struct {
+	Host     string `json:"host"`     // MediaMTX server host
+	RTSPPort int    `json:"rtspPort"` // MediaMTX RTSP port
+	RTMPPort int    `json:"rtmpPort"` // MediaMTX RTMP port
+}
+
 func Load() (*Config, error) {
 	cfg := &Config{
 		HTTP: HTTPConfig{
@@ -45,6 +52,11 @@ func Load() (*Config, error) {
 		Source: SourceConfig{
 			Type: getEnv("SOURCE_TYPE", ""),
 			URL:  getEnv("SOURCE_URL", ""),
+		},
+		MediaMTX: MediaMTXConfig{
+			Host:     getEnv("MEDIAMTX_HOST", "mediamtx"),
+			RTSPPort: getEnvAsInt("MEDIAMTX_RTSP_PORT", 8554),
+			RTMPPort: getEnvAsInt("MEDIAMTX_RTMP_PORT", 1935),
 		},
 	}
 

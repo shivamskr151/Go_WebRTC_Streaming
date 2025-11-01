@@ -86,25 +86,17 @@ func (c *Client) runOnce(ctx context.Context) error {
 		transport = "tcp"
 	}
 
-	// Force transcode to H.264 to handle non-H264 cameras reliably
-	// Handle both HEVC and H.264 input streams
+	// MediaMTX already provides optimized H.264 streams
+	// Just copy the stream without transcoding for lowest latency
+	// Add timeout and connection retry flags
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-rtsp_transport", transport,
 		"-fflags", "+genpts", // Generate presentation timestamps
 		"-avoid_negative_ts", "make_zero", // Handle negative timestamps
+		"-stimeout", "5000000", // 5 second socket timeout (in microseconds)
 		"-i", c.url,
-		"-an",             // No audio
-		"-c:v", "libx264", // Use H.264 encoder
-		"-preset", "veryfast", // Fast encoding
-		"-tune", "zerolatency", // Optimize for low latency
-		"-profile:v", "baseline", // Use baseline profile for compatibility
-		"-level", "3.1", // Level 3.1 for compatibility
-		"-pix_fmt", "yuv420p", // Pixel format
-		"-g", "30", // GOP size for better compatibility
-		"-keyint_min", "30", // Minimum keyframe interval
-		"-sc_threshold", "0", // Disable scene change detection
-		"-bf", "0", // No B-frames for lower latency
-		"-flags", "+low_delay", // Low delay flags
+		"-an",       // No audio
+		"-c:v", "copy", // Copy video stream (no transcoding - MediaMTX handles optimization)
 		"-f", "h264", // Output format
 		"pipe:1",
 	)
@@ -191,13 +183,22 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			// Log errors and warnings more prominently
-			if strings.Contains(line, "error") || strings.Contains(line, "Error") ||
-				strings.Contains(line, "failed") || strings.Contains(line, "Failed") ||
-				strings.Contains(line, "warning") || strings.Contains(line, "Warning") {
+			lineLower := strings.ToLower(line)
+			if strings.Contains(lineLower, "error") ||
+				strings.Contains(lineLower, "failed") ||
+				strings.Contains(lineLower, "cannot connect") ||
+				strings.Contains(lineLower, "connection refused") ||
+				strings.Contains(lineLower, "connection timed out") ||
+				strings.Contains(lineLower, "unable to open") {
+				logrus.Errorf("FFmpeg (rtsp) ERROR: %s", line)
+			} else if strings.Contains(lineLower, "warning") {
 				logrus.Warnf("FFmpeg (rtsp): %s", line)
-			} else {
+			} else if strings.Contains(lineLower, "stream") || strings.Contains(lineLower, "frame") {
 				logrus.Debugf("FFmpeg (rtsp): %s", line)
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			logrus.Errorf("FFmpeg stderr scanner error: %v", err)
 		}
 	}()
 
