@@ -52,11 +52,14 @@ func (c *RTMPClient) Start(ctx context.Context) error {
 		logrus.Infof("Attempting RTMP connection (attempt %d): %s", retries+1, c.url)
 
 		// Use FFmpeg to convert RTMP to H.264 stream
+		// Optimized for ultra-low latency
 		cmd = exec.CommandContext(ctx, "ffmpeg",
+			"-fflags", "+nobuffer+flush_packets", // Minimal buffering, flush immediately
+			"-flags", "low_delay",                // Low delay flag
 			"-i", c.url,
-			"-c", "copy", // copy all streams
-			"-f", "h264", // output H.264 format
-			"-an", // no audio
+			"-c:v", "copy",                       // Copy video stream (no re-encoding for lowest latency)
+			"-an",                                 // No audio
+			"-f", "h264",                         // Output H.264 format
 			"pipe:1",
 		)
 

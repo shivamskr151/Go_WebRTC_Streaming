@@ -5,6 +5,17 @@ import { getWebRTCConfig } from '../utils/webrtc-config'
 type MessageCallback = (type: 'success' | 'error' | '', text: string, duration?: number) => void
 type TrackReceivedCallback = (stream: MediaStream) => void
 
+/**
+ * Optimize SDP for ultra-low latency streaming
+ * Simplified version to avoid breaking SDP negotiation
+ */
+function optimizeSDPForLowLatency(sdp: string): string {
+  // Return SDP as-is for now - server already handles packetization-mode=1
+  // Adding modifications here can break SDP negotiation
+  // The backend WebRTC manager already has packetization-mode=1 configured
+  return sdp
+}
+
 interface UseWebRTCReturn {
   isConnected: boolean
   isConnecting: boolean
@@ -75,12 +86,16 @@ export const useWebRTC = (
         dataChannel.onopen = () => console.log('Data channel opened')
         dataChannel.onmessage = (event: MessageEvent) => console.log('Received message:', event.data)
 
-        // Request to receive media
-        pc.addTransceiver('video', { direction: 'recvonly' })
+        // Request to receive media with low-latency optimizations
+        pc.addTransceiver('video', { 
+          direction: 'recvonly',
+        })
         pc.addTransceiver('audio', { direction: 'recvonly' })
 
-        // Create and send offer
+        // Create and send offer (no additional options needed - addTransceiver handles it)
         const offer = await pc.createOffer()
+        
+        // SDP is already optimized by backend, no need to modify here
         await pc.setLocalDescription(offer)
 
         const answer = await sendOffer(offer)

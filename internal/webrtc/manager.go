@@ -115,13 +115,14 @@ func (m *Manager) CreatePeer(peerID string) (*Peer, error) {
 	}
 
 	// Create video track - use H.264 for better compatibility with RTMP streams
+	// Optimized for low latency with packetization-mode=1 (non-interleaved)
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{
 			MimeType:     webrtc.MimeTypeH264,
 			ClockRate:    90000,
 			Channels:     0,
-			SDPFmtpLine:  "profile-level-id=42e01f;packetization-mode=1",
-			RTCPFeedback: nil,
+			SDPFmtpLine:  "profile-level-id=42e01f;packetization-mode=1", // Mode 1 = non-interleaved, lower latency
+			RTCPFeedback: nil,                                            // Keep nil for maximum compatibility - browser handles feedback automatically
 		},
 		"video",
 		"stream",

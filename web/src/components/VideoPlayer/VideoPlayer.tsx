@@ -29,6 +29,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>((props
         autoPlay
         muted
         playsInline
+        preload="auto"
         {...props}
       />
       {isLoading && !videoRef.current?.srcObject && (

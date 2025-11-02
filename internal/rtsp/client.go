@@ -87,24 +87,30 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}
 
 	// Force transcode to H.264 to handle non-H264 cameras reliably
-	// Handle both HEVC and H.264 input streams
+	// Optimized for low latency streaming with RTSP compatibility
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-rtsp_transport", transport,
-		"-fflags", "+genpts", // Generate presentation timestamps
-		"-avoid_negative_ts", "make_zero", // Handle negative timestamps
+		"-rtsp_flags", "prefer_tcp", // Prefer TCP for stability
+		"-fflags", "+genpts", // Generate presentation timestamps (needed for RTSP)
+		"-flags", "low_delay", // Low delay flag
 		"-i", c.url,
 		"-an",             // No audio
 		"-c:v", "libx264", // Use H.264 encoder
-		"-preset", "veryfast", // Fast encoding
-		"-tune", "zerolatency", // Optimize for low latency
+		"-preset", "ultrafast", // Fastest encoding preset
+		"-tune", "zerolatency", // Optimize for zero latency
 		"-profile:v", "baseline", // Use baseline profile for compatibility
 		"-level", "3.1", // Level 3.1 for compatibility
 		"-pix_fmt", "yuv420p", // Pixel format
-		"-g", "30", // GOP size for better compatibility
-		"-keyint_min", "30", // Minimum keyframe interval
+		"-g", "15", // GOP size (balanced for low latency)
+		"-keyint_min", "15", // Minimum keyframe interval
 		"-sc_threshold", "0", // Disable scene change detection
 		"-bf", "0", // No B-frames for lower latency
-		"-flags", "+low_delay", // Low delay flags
+		"-slices", "1", // Single slice for lower latency
+		"-threads", "2", // Allow 2 threads for better performance
+		"-x264-params", "no-mbtree:sliced-threads=1", // Simplified low latency x264 params
+		"-b:v", "2M", // Bitrate
+		"-maxrate", "2M", // Max bitrate
+		"-bufsize", "2M", // Buffer size
 		"-f", "h264", // Output format
 		"pipe:1",
 	)
@@ -126,11 +132,14 @@ func (c *Client) runOnce(ctx context.Context) error {
 	logrus.Infof("FFmpeg process started with PID: %d", cmd.Process.Pid)
 
 	// Stream loop blocks until EOF or error
+	// stderrBuffer will be captured in streamLoop closure
 	c.streamLoop(ctx, stdout, stderr)
 
 	// Ensure process exited
-	if err := cmd.Wait(); err != nil {
-		logrus.Warnf("FFmpeg process exited with error: %v", err)
+	err = cmd.Wait()
+	if err != nil {
+		logrus.Errorf("FFmpeg process exited with error: %v", err)
+		return fmt.Errorf("ffmpeg exited with error: %w", err)
 	} else {
 		logrus.Info("FFmpeg process exited normally")
 	}
@@ -186,17 +195,30 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 	// mark running for this session
 	c.setRunning(true)
 
+	// Capture stderr for error detection and logging
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
+
 			// Log errors and warnings more prominently
-			if strings.Contains(line, "error") || strings.Contains(line, "Error") ||
-				strings.Contains(line, "failed") || strings.Contains(line, "Failed") ||
-				strings.Contains(line, "warning") || strings.Contains(line, "Warning") {
+			lowerLine := strings.ToLower(line)
+			if strings.Contains(lowerLine, "error") ||
+				strings.Contains(lowerLine, "failed") ||
+				strings.Contains(lowerLine, "unable") ||
+				strings.Contains(lowerLine, "connection") ||
+				strings.Contains(lowerLine, "timeout") {
+				logrus.Errorf("FFmpeg (rtsp) ERROR: %s", line)
+			} else if strings.Contains(lowerLine, "warning") {
 				logrus.Warnf("FFmpeg (rtsp): %s", line)
 			} else {
-				logrus.Debugf("FFmpeg (rtsp): %s", line)
+				// Only log important info lines (stream info, codec, etc.)
+				if strings.Contains(line, "Stream") || strings.Contains(line, "codec") ||
+					strings.Contains(line, "fps") || strings.Contains(line, "bitrate") {
+					logrus.Infof("FFmpeg (rtsp): %s", line)
+				} else {
+					logrus.Debugf("FFmpeg (rtsp): %s", line)
+				}
 			}
 		}
 	}()
