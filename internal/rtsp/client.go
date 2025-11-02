@@ -107,7 +107,6 @@ func (c *Client) runOnce(ctx context.Context) error {
 		"-bf", "0", // No B-frames for lower latency
 		"-slices", "1", // Single slice for lower latency
 		"-threads", "2", // Allow 2 threads for better performance
-		"-x264-params", "no-mbtree:sliced-threads=1", // Simplified low latency x264 params
 		"-b:v", "2M", // Bitrate
 		"-maxrate", "2M", // Max bitrate
 		"-bufsize", "2M", // Buffer size
@@ -198,6 +197,9 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 	// Capture stderr for error detection and logging
 	go func() {
 		scanner := bufio.NewScanner(stderr)
+		// Increase buffer size to handle long error messages (default is 64KB)
+		buf := make([]byte, 0, 1024*1024) // 1MB buffer
+		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 
@@ -225,6 +227,10 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Split(splitH264Frames)
+	// Increase buffer size to handle large H.264 frames (default is 64KB)
+	// H.264 frames can be much larger, especially for high resolution streams
+	buf := make([]byte, 0, 10*1024*1024) // 10MB initial capacity
+	scanner.Buffer(buf, 10*1024*1024)    // 10MB max token size
 
 	frameCount := 0
 	for scanner.Scan() {

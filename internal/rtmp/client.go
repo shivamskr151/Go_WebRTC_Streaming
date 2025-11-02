@@ -55,11 +55,11 @@ func (c *RTMPClient) Start(ctx context.Context) error {
 		// Optimized for ultra-low latency
 		cmd = exec.CommandContext(ctx, "ffmpeg",
 			"-fflags", "+nobuffer+flush_packets", // Minimal buffering, flush immediately
-			"-flags", "low_delay",                // Low delay flag
+			"-flags", "low_delay", // Low delay flag
 			"-i", c.url,
-			"-c:v", "copy",                       // Copy video stream (no re-encoding for lowest latency)
-			"-an",                                 // No audio
-			"-f", "h264",                         // Output H.264 format
+			"-c:v", "copy", // Copy video stream (no re-encoding for lowest latency)
+			"-an",        // No audio
+			"-f", "h264", // Output H.264 format
 			"pipe:1",
 		)
 
@@ -155,6 +155,9 @@ func (c *RTMPClient) streamLoop(ctx context.Context, stdout, stderr io.ReadClose
 	// Log stderr in a separate goroutine
 	go func() {
 		scanner := bufio.NewScanner(stderr)
+		// Increase buffer size to handle long error messages (default is 64KB)
+		buf := make([]byte, 0, 1024*1024) // 1MB buffer
+		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
 			logrus.Debugf("FFmpeg: %s", scanner.Text())
 		}
@@ -163,6 +166,10 @@ func (c *RTMPClient) streamLoop(ctx context.Context, stdout, stderr io.ReadClose
 	// Read H.264 data from stdout
 	scanner := bufio.NewScanner(stdout)
 	scanner.Split(c.splitH264Frames)
+	// Increase buffer size to handle large H.264 frames (default is 64KB)
+	// H.264 frames can be much larger, especially for high resolution streams
+	buf := make([]byte, 0, 10*1024*1024) // 10MB initial capacity
+	scanner.Buffer(buf, 10*1024*1024)    // 10MB max token size
 
 	frameCount := 0
 
