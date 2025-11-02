@@ -174,15 +174,11 @@ func (c *RTMPClient) streamLoop(ctx context.Context, stdout, stderr io.ReadClose
 				continue
 			}
 
-			// Calculate timestamp
-			now := time.Now()
-			timestamp := uint32(now.UnixNano() / 1000000) // Convert to milliseconds
+			// Timestamp is now handled in WebRTC manager
+			timestamp := uint32(0)
 
-			// Send frame to WebRTC
-			logrus.Infof("Sending H.264 frame: size=%d, frame=%d, timestamp=%d", len(frameData), frameCount, timestamp)
-
-			// Log first few bytes to debug H.264 format
-			if frameCount < 5 && len(frameData) > 0 {
+			// Only log first frame for debugging
+			if frameCount == 0 && len(frameData) > 0 {
 				maxBytes := 16
 				if len(frameData) < maxBytes {
 					maxBytes = len(frameData)
@@ -191,7 +187,7 @@ func (c *RTMPClient) streamLoop(ctx context.Context, stdout, stderr io.ReadClose
 				for i := 0; i < maxBytes; i++ {
 					hexBytes[i] = fmt.Sprintf("%02x", frameData[i])
 				}
-				logrus.Infof("Frame %d first bytes: %s", frameCount, strings.Join(hexBytes, " "))
+				logrus.Infof("RTMP: First frame bytes: %s (size: %d)", strings.Join(hexBytes, " "), len(frameData))
 			}
 
 			if c.shouldWrite == nil || c.shouldWrite() {
@@ -200,8 +196,8 @@ func (c *RTMPClient) streamLoop(ctx context.Context, stdout, stderr io.ReadClose
 
 			frameCount++
 
-			// Log progress every 30 frames (about 1 second at 30fps)
-			if frameCount%30 == 0 {
+			// Log progress every 300 frames (~10 seconds at 30fps) instead of every 30
+			if frameCount%300 == 0 {
 				logrus.Infof("✅ RTMP stream: sent %d frames", frameCount)
 			}
 		}

@@ -216,8 +216,11 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 				continue
 			}
 
-			timestamp := uint32(time.Now().UnixNano() / 1000000)
-			if frameCount < 10 && len(frameData) > 0 {
+			// Timestamp is now handled in WebRTC manager
+			timestamp := uint32(0)
+
+			// Only log first frame for debugging
+			if frameCount == 0 && len(frameData) > 0 {
 				maxBytes := 16
 				if len(frameData) < maxBytes {
 					maxBytes = len(frameData)
@@ -226,25 +229,16 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 				for i := 0; i < maxBytes; i++ {
 					hexBytes[i] = fmt.Sprintf("%02x", frameData[i])
 				}
-				logrus.Infof("RTSP frame %d first bytes: %s (size: %d)", frameCount, strings.Join(hexBytes, " "), len(frameData))
-
-				// Check for valid H.264 start codes
-				if len(frameData) >= 4 {
-					startCode1 := frameData[0] == 0x00 && frameData[1] == 0x00 && frameData[2] == 0x00 && frameData[3] == 0x01
-					startCode2 := frameData[0] == 0x00 && frameData[1] == 0x00 && frameData[2] == 0x01
-					if startCode1 || startCode2 {
-						logrus.Infof("RTSP frame %d: Valid H.264 start code detected", frameCount)
-					} else {
-						logrus.Warnf("RTSP frame %d: No valid H.264 start code found", frameCount)
-					}
-				}
+				logrus.Infof("RTSP: First frame bytes: %s (size: %d)", strings.Join(hexBytes, " "), len(frameData))
 			}
 
 			if c.shouldWrite == nil || c.shouldWrite() {
 				c.webrtcManager.WriteVideoSample(frameData, timestamp)
 			}
 			frameCount++
-			if frameCount%30 == 0 {
+
+			// Log progress every 300 frames (~10 seconds at 30fps) instead of every 30
+			if frameCount%300 == 0 {
 				logrus.Infof("✅ RTSP stream: sent %d frames", frameCount)
 			}
 		}

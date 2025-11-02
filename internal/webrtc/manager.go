@@ -24,6 +24,11 @@ type Manager struct {
 	rtpSequenceNumber uint16
 	rtpTimestamp      uint32
 	rtpSSRC           uint32
+	// Video timestamp tracking (in 90kHz clock for H.264)
+	videoTimestamp     uint32
+	videoTimestampLock sync.Mutex
+	lastFrameTime      time.Time
+	frameRate          float64
 	// Real-time snapshot capture
 	snapshotRequest chan bool
 	snapshotData    chan []byte
@@ -54,6 +59,9 @@ func NewManager() *Manager {
 		rtpSequenceNumber: 0,
 		rtpTimestamp:      0,
 		rtpSSRC:           0x12345678, // Random SSRC
+		videoTimestamp:    0,
+		lastFrameTime:     time.Now(),
+		frameRate:         30.0, // Default 30fps
 		snapshotRequest:   make(chan bool, 1),
 		snapshotData:      make(chan []byte, 1),
 		snapshotReady:     false,
@@ -264,19 +272,8 @@ func (m *Manager) HandleOffer(peerID string, offer webrtc.SessionDescription) (*
 }
 
 func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
-	m.peersLock.RLock()
-	defer m.peersLock.RUnlock()
-
-	logrus.Debugf("Writing video sample: size=%d, timestamp=%d, peers=%d", len(data), timestamp, len(m.peers))
-
-	// Check if data has valid H.264 start codes
-	if len(data) >= 4 {
-		hasStartCode := (data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x00 && data[3] == 0x01) ||
-			(data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x01)
-		if !hasStartCode {
-			logrus.Warnf("Video sample does not have valid H.264 start code: %02x %02x %02x %02x",
-				data[0], data[1], data[2], data[3])
-		}
+	if len(data) == 0 {
+		return
 	}
 
 	// Check if snapshot is requested and capture this frame
@@ -296,6 +293,38 @@ func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
 		// No snapshot request, continue normally
 	}
 
+	// Calculate proper timestamp in 90kHz clock (H.264 standard)
+	// 90kHz = 90,000 ticks per second = 90,000,000 ticks per millisecond
+	m.videoTimestampLock.Lock()
+	now := time.Now()
+	if m.lastFrameTime.IsZero() {
+		m.lastFrameTime = now
+		m.videoTimestamp = 0
+	} else {
+		// Calculate time delta and increment timestamp accordingly
+		elapsed := now.Sub(m.lastFrameTime)
+		// Convert elapsed time to 90kHz ticks: elapsed_ns * 90,000 / 1,000,000,000
+		// For better precision, use: elapsed_ns / 1,000,000,000 * 90,000
+		elapsedNs := elapsed.Nanoseconds()
+		// Use integer math: multiply by 90,000 first, then divide by 1 billion
+		timestampDelta := uint32(elapsedNs * 90000 / 1000000000)
+
+		// Ensure minimum timestamp increment (avoid 0 delta which causes issues)
+		if timestampDelta == 0 {
+			// Default to ~33.33ms at 30fps = 3000 ticks at 90kHz
+			timestampDelta = 3000
+		}
+		// Cap maximum delta to prevent large jumps (max 100ms = 9000 ticks)
+		if timestampDelta > 9000 {
+			timestampDelta = 3000 // Reset to normal frame interval
+		}
+
+		m.videoTimestamp += timestampDelta
+		m.lastFrameTime = now
+	}
+	currentTimestamp := m.videoTimestamp
+	m.videoTimestampLock.Unlock()
+
 	// Parse H.264 NAL units from the data
 	nalUnits, err := m.parseH264NALUnits(data)
 	if err != nil {
@@ -303,39 +332,79 @@ func (m *Manager) WriteVideoSample(data []byte, timestamp uint32) {
 		return
 	}
 
-	logrus.Debugf("Parsed %d NAL units from video sample", len(nalUnits))
+	if len(nalUnits) == 0 {
+		return
+	}
 
+	// Calculate frame duration (for 30fps = 33.33ms = 3000 ticks at 90kHz)
+	frameDuration := time.Duration(float64(time.Second) / m.frameRate)
+
+	// Separate SPS/PPS from other NAL units
+	var spsPpsUnits [][]byte
+	var frameUnits [][]byte
+
+	for _, nalUnit := range nalUnits {
+		if len(nalUnit) == 0 {
+			continue
+		}
+		nalType := nalUnit[0] & 0x1F
+		if nalType == 7 || nalType == 8 { // SPS or PPS
+			spsPpsUnits = append(spsPpsUnits, nalUnit)
+		} else {
+			frameUnits = append(frameUnits, nalUnit)
+		}
+	}
+
+	m.peersLock.RLock()
+	peers := make([]*Peer, 0, len(m.peers))
 	for _, peer := range m.peers {
+		peers = append(peers, peer)
+	}
+	m.peersLock.RUnlock()
+
+	// Send SPS/PPS first (they don't need timestamp increment)
+	for _, peer := range peers {
 		peer.mu.RLock()
 		hasVideoTrack := peer.VideoTrack != nil
 		peer.mu.RUnlock()
 
-		if hasVideoTrack {
-			// Send each NAL unit as a separate sample
-			for i, nalUnit := range nalUnits {
-				if len(nalUnit) == 0 {
-					continue
-				}
+		if !hasVideoTrack {
+			continue
+		}
 
-				// Log NAL unit type for debugging
-				if len(nalUnit) > 0 {
-					nalType := nalUnit[0] & 0x1F
-					logrus.Debugf("NAL unit %d: type=%d, size=%d", i, nalType, len(nalUnit))
-				}
+		for _, nalUnit := range spsPpsUnits {
+			sample := media.Sample{
+				Data:            nalUnit,
+				Duration:        0, // SPS/PPS have no duration
+				PacketTimestamp: 0, // Use 0 for parameter sets
+			}
 
-				sample := media.Sample{
-					Data:     nalUnit,
-					Duration: time.Millisecond * 33, // ~30fps
-				}
-				if timestamp > 0 {
-					sample.PacketTimestamp = timestamp
-				}
+			if err := peer.VideoTrack.WriteSample(sample); err != nil {
+				logrus.Errorf("Failed to write SPS/PPS to peer %s: %v", peer.ID, err)
+			}
+		}
+	}
 
-				if err := peer.VideoTrack.WriteSample(sample); err != nil {
-					logrus.Errorf("Failed to write video sample to peer %s: %v", peer.ID, err)
-				} else {
-					logrus.Debugf("Successfully wrote NAL unit to peer %s: size=%d", peer.ID, len(nalUnit))
-				}
+	// Send frame NAL units with proper timestamp
+	for _, peer := range peers {
+		peer.mu.RLock()
+		hasVideoTrack := peer.VideoTrack != nil
+		peer.mu.RUnlock()
+
+		if !hasVideoTrack {
+			continue
+		}
+
+		// Send all NAL units from the same frame with the same timestamp
+		for _, nalUnit := range frameUnits {
+			sample := media.Sample{
+				Data:            nalUnit,
+				Duration:        frameDuration,
+				PacketTimestamp: currentTimestamp,
+			}
+
+			if err := peer.VideoTrack.WriteSample(sample); err != nil {
+				logrus.Errorf("Failed to write video sample to peer %s: %v", peer.ID, err)
 			}
 		}
 	}
