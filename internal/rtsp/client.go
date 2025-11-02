@@ -88,11 +88,13 @@ func (c *Client) runOnce(ctx context.Context) error {
 
 	// Force transcode to H.264 to handle non-H264 cameras reliably
 	// Optimized for low latency streaming with RTSP compatibility
+	// Added HEVC decoder options to handle RPS (Reference Picture Set) errors gracefully
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-rtsp_transport", transport,
 		"-rtsp_flags", "prefer_tcp", // Prefer TCP for stability
-		"-fflags", "+genpts", // Generate presentation timestamps (needed for RTSP)
+		"-fflags", "+genpts+discardcorrupt", // Generate PTS and discard corrupted frames
 		"-flags", "low_delay", // Low delay flag
+		"-err_detect", "ignore_err", // Ignore decoder errors (handles HEVC RPS errors)
 		"-i", c.url,
 		"-an",             // No audio
 		"-c:v", "libx264", // Use H.264 encoder
@@ -110,6 +112,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 		"-b:v", "2M", // Bitrate
 		"-maxrate", "2M", // Max bitrate
 		"-bufsize", "2M", // Buffer size
+		"-vsync", "0", // Passthrough timestamps, avoid frame rate conversion issues
 		"-f", "h264", // Output format
 		"pipe:1",
 	)
@@ -205,7 +208,15 @@ func (c *Client) streamLoop(ctx context.Context, stdout, stderr io.ReadCloser) {
 
 			// Log errors and warnings more prominently
 			lowerLine := strings.ToLower(line)
-			if strings.Contains(lowerLine, "error") ||
+			// HEVC RPS (Reference Picture Set) errors are handled gracefully, log as warnings
+			isRPSError := strings.Contains(lowerLine, "error constructing the frame rps") ||
+				strings.Contains(lowerLine, "error constructing the frame") ||
+				strings.Contains(lowerLine, "rps")
+
+			if isRPSError {
+				// RPS errors are expected with HEVC streams and are now handled - log as debug
+				logrus.Debugf("FFmpeg (rtsp) HEVC decoder: %s", line)
+			} else if strings.Contains(lowerLine, "error") ||
 				strings.Contains(lowerLine, "failed") ||
 				strings.Contains(lowerLine, "unable") ||
 				strings.Contains(lowerLine, "connection") ||
